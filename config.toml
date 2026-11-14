@@ -1,0 +1,12 @@
+# Keep Greenlight snappy: no toolbar, no usage pings, fast reruns.
+[client]
+toolbarMode = "minimal"
+
+[runner]
+fastReruns = true
+
+[browser]
+gatherUsageStats = false
+
+[server]
+runOnSave = false
