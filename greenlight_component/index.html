@@ -995,6 +995,18 @@ table.dtable,table.lft{width:100%;border-collapse:separate;border-spacing:0;font
 .cal .day.sel,.cal .day.sel.open,.cal .day.sel.soon{background:var(--pick-bg)!important;background-image:none!important;border-color:var(--pick-bg);color:var(--pick-fg)}
 .cal .day.sel .l{color:var(--pick-fg)!important}
 .cal .day.sel.soon::after{background:var(--pick-fg)}
+
+/* v12: scrolling inside Streamlit, cursive app name */
+html.embed{height:100%;overflow:hidden}
+html.embed body{height:100%;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-gutter:stable}
+html.embed body::-webkit-scrollbar{width:10px}
+html.embed body::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--fg) 25%,transparent);border-radius:10px;border:2px solid var(--bg)}
+html.embed main{padding-bottom:max(40px,env(safe-area-inset-bottom,0px))}
+.brand .name{font-family:'Pacifico','Brush Script MT','Segoe Script','Lucida Handwriting',cursive;font-weight:400;font-size:28px;line-height:1.5;letter-spacing:0;padding:0 .25em .12em 0;background:linear-gradient(100deg,var(--accent-ink),var(--accent) 55%,var(--teal));-webkit-background-clip:text;background-clip:text;color:transparent}
+@media (max-width:640px){.brand .name{font-size:23px}}
+.spin{display:inline-block;width:14px;height:14px;margin-right:8px;vertical-align:-2px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+body.busy .btn.primary.working{opacity:1}
 </style>
 </head>
 <body>
@@ -1017,7 +1029,13 @@ var MODE = window.GREENLIGHT_MODE === 'streamlit' ? 'streamlit' : 'demo';
 var STANDALONE = false;
 try { STANDALONE = MODE === 'streamlit' && window.parent === window; } catch (x) {}
 if (STANDALONE) MODE = 'demo';
-var POLL_MS = 4000;
+/* Inside Streamlit the frame cannot scroll itself (the host turns frame scrolling off), so the page body
+   becomes the scroll area and always reaches the very bottom. */
+if (MODE === 'streamlit') document.documentElement.classList.add('embed');
+function scrollBox(){ return document.documentElement.classList.contains('embed') ? document.body : null; }
+function getY(){ var b = scrollBox(); return b ? b.scrollTop : window.scrollY; }
+function scrollToY(y){ var b = scrollBox(); if (b) b.scrollTop = y; else window.scrollTo(0, y); }
+var POLL_MS = 3000;
 
 /* ---------- helpers ---------- */
 var $ = function(s, r){ return (r || document).querySelector(s); };
@@ -1472,7 +1490,7 @@ function seenGet(r){ var m = UI.seen && UI.seen[r]; try { return !!m || localSto
 function seenSet(r){ UI.seen = UI.seen || {}; UI.seen[r] = true; try { localStorage.setItem('greenlight_seen_' + r, '1'); } catch (e) {} }
 function enterRole(role){
   UI.role = role;
-  var go = function(v){ UI.view = v; render(); window.scrollTo(0, 0); };
+  var go = function(v){ UI.view = v; render(); scrollToY(0); };
   if (role === 'gsd'){ if (agent()){ lsSet('greenlight_role', 'gsd'); if (!UI.fromGuide && UI.view !== 'welcome'){ UI.fromGuide = false; return go('welcome'); } } go('request'); return; }
   if (role === 'manager'){ if (S.isManager) return go('approvals'); UI.loginRole = 'manager'; UI.loginMgr = ''; return openModal({type:'mgrpick'}); }
   if (role === 'ovadmin'){ if (canOvr()) return go('overrides'); UI.loginRole = 'ovadmin'; return openModal({type:'login'}); }
@@ -1532,9 +1550,9 @@ function render(){
   if (!S || UI.picking) return;
   chrome();
   var views = {request:function(){ return S.isAdmin || S.isManager ? viewDashboard() : viewRequest(); }, approvals:viewApprovals, reports:viewReports, pending:viewPending, overrides:viewOverrides, manage:viewManage, setup:viewSetup, landing:viewLanding, welcome:viewWelcome};
-  var y = window.scrollY;
+  var y = getY();
   $('#main').innerHTML = (MODE === 'demo' ? '<div class="demo">' + (STANDALONE ? '<b>Opened on its own, outside the Streamlit app.</b> To save to MongoDB, run <code>streamlit run app.py</code> and open the address it shows. ' : '') + 'Preview with sample data. Nothing you do here is saved. WFM passcode: <b>admin</b> · Admin passcode: <b>overrides</b> · Developer key: <b>dev</b> · Manager: choose a name, passcode <b>manager</b></div>' : '') + views[UI.view]();
-  window.scrollTo(0, y);
+  scrollToY(y);
   if (UI.modal && (UI.modal.type === 'cal' || UI.modal.type === 'alloc' || UI.modal.type === 'mytl')) renderModal(true);
 }
 
@@ -2399,7 +2417,7 @@ var val = function(id){ var e = document.getElementById(id); return e ? e.value 
 var after = function(msg){ return function(r){ if (!r.error){ if (msg) toast(msg); closeModal(); } }; };
 var ACT = {
   rechoose: function(){ UI.chosenRole = null; UI.role = null; render(); },
-  home: function(){ UI.chosenRole = null; UI.view = 'landing'; UI.fromGuide = false; closeModal(); render(); window.scrollTo(0, 0); },
+  home: function(){ UI.chosenRole = null; UI.view = 'landing'; UI.fromGuide = false; closeModal(); render(); scrollToY(0); },
   pickRole: function(el){
     if (UI.picking) return;
     var r = el.dataset.v, box = el.closest('.roles');
@@ -2418,7 +2436,7 @@ var ACT = {
   openMine: function(el){ UI.tlFrom = UI.modal && UI.modal.type === 'cal' ? 'cal' : ''; UI.myEdit = null; UI.myCancel = null; openModal({type:'mytl', id:el.dataset.id}); },
   tlBack: function(){ UI.myEdit = null; UI.myCancel = null; openModal({type:'cal'}); },
   repick: function(el){ var q = S.requests.find(function(x){ return x.id === el.dataset.id; }); if (q && q.date >= S.today) UI.picked.add(q.date); UI.myEdit = null; UI.myCancel = null; openModal({type:'cal'}); },
-  guide: function(){ UI.role = UI.role || (S.isAdmin ? 'wfm' : S.isOvAdmin ? 'ovadmin' : S.isManager ? 'manager' : 'gsd'); UI.fromGuide = true; UI.view = 'welcome'; render(); window.scrollTo(0, 0); },
+  guide: function(){ UI.role = UI.role || (S.isAdmin ? 'wfm' : S.isOvAdmin ? 'ovadmin' : S.isManager ? 'manager' : 'gsd'); UI.fromGuide = true; UI.view = 'welcome'; render(); scrollToY(0); },
   welcomeBack: function(){ UI.chosenRole = null; UI.view = 'landing'; render(); },
   welcomeGo: function(){ seenSet(UI.role || 'gsd'); UI.fromGuide = false; enterRole(UI.role || 'gsd'); },
   loginRole: function(el){ UI.loginRole = el.dataset.v; renderModal(true); },
@@ -2440,14 +2458,14 @@ var ACT = {
   openNtf: function(){ var a = agent(); if (!a) return; UI.ntfSeenAt = ntfSeen(); var top = myNotices()[0]; lsSet('greenlight_ntf_' + a.employee_id, top ? top.n.at : new Date().toISOString()); openModal({type:'ntf'}); chrome(); },
   doMgrCancel: function(){ call('cancelRequest', {id:UI.modal.id, reason:val('mcReason')}).then(function(r){ if (!r.error){ closeModal(); toast('Request cancelled. The slot is open again.'); } }); },
   mgrPass: function(el){ openModal({type:'mpass', name:el.dataset.n}); },
-  go: function(el){ UI.view = el.dataset.v; render(); window.scrollTo(0, 0); },
+  go: function(el){ UI.view = el.dataset.v; render(); scrollToY(0); },
   dashTeam: function(el){ UI.dashTeam = el.dataset.v; UI.lf.manager = ''; render(); },
   month: function(el){ UI[el.dataset.k] = addMonths(UI[el.dataset.k], +el.dataset.n); if (el.dataset.k === 'dashMonth') UI.lf.date = ''; render(); },
   openLogin: function(){ ACT.home(); },
-  logout: function(){ call('logout').then(function(){ UI.dashTeam = 'mine'; lsSet('greenlight_token', ''); lsSet('greenlight_agent', ''); lsSet('greenlight_role', ''); UI.agentId = null; UI.picked.clear(); UI.role = null; UI.chosenRole = null; UI.view = 'landing'; render(); window.scrollTo(0, 0); toast('Signed out'); }); },
+  logout: function(){ call('logout').then(function(){ UI.dashTeam = 'mine'; lsSet('greenlight_token', ''); lsSet('greenlight_agent', ''); lsSet('greenlight_role', ''); UI.agentId = null; UI.picked.clear(); UI.role = null; UI.chosenRole = null; UI.view = 'landing'; render(); scrollToY(0); toast('Signed out'); }); },
   closeModal: closeModal,
   bgClose: function(el, e){ if (e.target === el) closeModal(); },
-  chooseAgent: function(el){ UI.agentId = el.dataset.id; UI.role = 'gsd'; lsSet('greenlight_agent', UI.agentId); lsSet('greenlight_role', 'gsd'); UI.q = ''; UI.picked.clear(); UI.askOvr = false; UI.ovText = ''; UI.view = 'welcome'; UI.fromGuide = false; render(); window.scrollTo(0, 0); },
+  chooseAgent: function(el){ UI.agentId = el.dataset.id; UI.role = 'gsd'; lsSet('greenlight_agent', UI.agentId); lsSet('greenlight_role', 'gsd'); UI.q = ''; UI.picked.clear(); UI.askOvr = false; UI.ovText = ''; UI.view = 'welcome'; UI.fromGuide = false; render(); scrollToY(0); },
   openCal: function(){ openModal({type:'cal'}); },
   openAlloc: function(el){ openModal({type:'alloc', dept:el.dataset.v}); },
   applyDefault: function(){ var m = UI.modal, v = val('defN').trim(), kind = val('defKind') === 'required' ? 'required' : 'slots';
@@ -2562,7 +2580,8 @@ document.addEventListener('submit', function(e){ e.preventDefault();
     if (nw !== val('pwNew2')){ toast('The two new passcodes do not match.', true); return; }
     call('changePassword', {current:cur, next:nw}).then(function(r){ if (!r.error){ toast('Passcode changed'); render(); } }); return; }
   if (e.target.dataset.form === 'login'){ var role = UI.loginRole === 'ovadmin' ? 'ovadmin' : UI.loginRole === 'admin' ? 'admin' : 'manager', mg = role === 'manager', oa = role === 'ovadmin'; if (mg && !val('mgrName')){ toast('Choose your name.', true); return; } UI.loginMgr = mg ? val('mgrName') : UI.loginMgr;
-    call('login', mg ? {role:'manager', manager:val('mgrName'), password:val('adminPass')} : oa ? {role:'ovadmin', password:val('adminPass')} : {password:val('adminPass')}).then(function(r){ if (!r.error){ if (r.token) lsSet('greenlight_token', r.token); lsSet('greenlight_role', ''); closeModal(); UI.role = mg ? 'manager' : oa ? 'ovadmin' : 'wfm'; UI.view = 'welcome'; UI.fromGuide = false; render(); window.scrollTo(0, 0); toast(mg ? 'Signed in as manager' : oa ? 'Signed in as Admin' : 'Signed in as WFM'); } }); }
+    var lb = e.target.querySelector('.btn.primary'), lt = lb ? lb.innerHTML : ''; if (lb){ lb.innerHTML = '<span class="spin" aria-hidden="true"></span>Signing in…'; lb.classList.add('working'); }
+    call('login', mg ? {role:'manager', manager:val('mgrName'), password:val('adminPass')} : oa ? {role:'ovadmin', password:val('adminPass')} : {password:val('adminPass')}).then(function(r){ if (r.error && lb && document.body.contains(lb)){ lb.innerHTML = lt; lb.classList.remove('working'); } if (!r.error){ if (r.token) lsSet('greenlight_token', r.token); lsSet('greenlight_role', ''); closeModal(); UI.role = mg ? 'manager' : oa ? 'ovadmin' : 'wfm'; UI.view = 'welcome'; UI.fromGuide = false; render(); scrollToY(0); toast(mg ? 'Signed in as manager' : oa ? 'Signed in as Admin' : 'Signed in as WFM'); } }); }
   if (e.target.dataset.form === 'mpass') call('setManagerPasscode', {name:UI.modal.name, passcode:val('mpPass')}).then(function(r){ if (!r.error){ closeModal(); toast('Passcode saved'); } }); });
 document.addEventListener('keydown', function(e){
   if (e.key === 'Escape' && UI.modal) closeModal();
