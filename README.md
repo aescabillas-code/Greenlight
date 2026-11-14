@@ -12,6 +12,7 @@ PTO request app. Streamlit hosts the HTML front end and talks to MongoDB.
 | `roster_template.xlsx` | Formatted roster template with dropdowns and a how-to tab. The app offers the same file in Settings > Roster. |
 | `.streamlit/secrets.toml.example` | The secrets the app expects. |
 | `.streamlit/config.toml` | Speed settings: no toolbar, no usage stats, fast reruns. |
+| `greenlight_logo.png` | The logo shown on the browser tab. |
 
 ## Run it locally
 
@@ -80,13 +81,13 @@ Override requests: when a picked date is inside the notice window or has no slot
 - `managers`: one document per manager (`_id` is the name as written in the roster) with a hashed `passcode`
 - `sessions`: one document per signed-in manager or WFM browser (`_id` is a hash of the sign-in token), removed automatically after 30 days of no use or when the person signs out
 - `locks`: short-lived documents (`_id` is department|region|date) that let only one person at a time take a slot for one team on one day. Each lives a few milliseconds and is removed automatically if a server crashes mid-save.
-- `settings`: one document, `_id: "config"`, with approval_mode, min_notice_days, mgr_max_hours
+- `settings`: one document (including `ovr_reject_hours`, the override cut-off), `_id: "config"`, with approval_mode, min_notice_days, mgr_max_hours
 
 ## Who sees what
 
 Every role has **Guide** as the first tab. The guide also opens after each sign in, with a **Get started** button that goes to the dashboard.
 
-The app opens on a landing page with four circles: **GSD** (agents), **Manager**, **WFM** and **Admin**. People sign in first (agents pick their name, Manager, WFM and Admin enter a passcode). Every time someone signs in, the role's short welcome guide is the first thing shown, with a Get started button that leads to their view. (Reloading while still signed in goes straight to the view.) Guide is always the first tab, so it can be reopened at any time. Click the Greenlight logo to return to the landing page. Every step of every guide (GSD, Manager, WFM and Admin) has a short animated demo recorded from the current app. When a role is picked, its circle moves to the centre and the others fade away. Manager opens a window of profile circles with the names from the roster's Current Manager column; pick yours, then enter the passcode. WFM asks for the WFM passcode and Admin for the Admin passcode (developers use their key in either). The GSD, Manager and WFM guides highlight the manager approval window (72 hours by default, set by WFM).
+The app opens on a landing page with four circles: **GSD** (agents), **Manager**, **WFM** and **Admin**. People sign in first (agents pick their name, Manager, WFM and Admin enter a passcode). Every time someone signs in, the role's short welcome guide is the first thing shown, with a Get started button that leads to their view. (Reloading while still signed in goes straight to the view.) Guide is always the first tab, so it can be reopened at any time. The guide shows one step per screen, with arrows on both sides (or the arrow keys) and dots to jump to a step. Click the Greenlight logo to return to the landing page. Every step of every guide (GSD, Manager, WFM and Admin) has a short animated demo recorded from the current app. When a role is picked, its circle moves to the centre and the others fade away. Manager opens a window of profile circles with the names from the roster's Current Manager column; pick yours, then enter the passcode. WFM asks for the WFM passcode and Admin for the Admin passcode (developers use their key in either). The GSD, Manager and WFM guides highlight the manager approval window (72 hours by default, set by WFM).
 
 **Stay signed in.** Managers and WFM stay signed in on that browser until they press Sign out (a sign-in token is kept in the browser and checked against the `sessions` collection, for up to 30 days of use). Agents are remembered on their device too: the app opens straight to their calendar, and Sign out (or Not you?) forgets them. Changing the admin passcode signs out other admin devices.
 
@@ -96,8 +97,8 @@ One app address for everyone. People sign in only when their role needs it.
 |---|---|---|
 | Agent | No passcode. Search your name once; the device remembers you until Sign out. | PTO Dashboard: Submit PTO request circle and request history. Tap a requested date to see its timeline (Submitted, Manager approval, Automated WFM review), edit it while the manager has not answered, or cancel it before the date. Plus the dashboard. |
 | Manager | Pick Manager, choose your profile circle, enter your passcode. Stays signed in. | PTO Dashboard (own team by default, All requests on a switch), plus **Approvals**: only their own team's requests, with bulk approve and reject, and a list of upcoming approved time off (only the agent can cancel a request). |
-| Admin | Pick Admin, enter `OVERRIDE_PASSWORD`. Stays signed in. | Override requests: every override request from every agent goes here, to approve or reject one by one or in bulk. Reports: daily headcount after PTO (chart and tables), lowest-coverage days, requests by status, PTO days by team and override outcomes, filtered by month, department and region. |
-| WFM | Pick WFM, enter the WFM passcode. Stays signed in. | PTO Dashboard (headcount after PTO and coverage charts, requests by status, PTO by team, overrides, people off each day, and the approved/rejected table, where selecting a row opens the request to edit or fix it), Pending (only while Manual review is on), Settings, roster, allocation, manager passcodes. |
+| Admin | Pick Admin, enter `OVERRIDE_PASSWORD`. Stays signed in. | Override requests: every override request from every agent goes here, to approve or reject one by one or in bulk. Settings: how many hours before the requested date an unreviewed override request is rejected automatically (24 by default, 1 to 336). Reports: daily headcount after PTO (chart and tables), lowest-coverage days, requests by status, PTO days by team and override outcomes, filtered by month, department and region. |
+| WFM | Pick WFM, enter the WFM passcode. Stays signed in. | PTO Dashboard (headcount after PTO and coverage charts, requests by status, PTO by team, overrides, people off each day, and the All requests table with every status, where selecting a row shows its details; requests cannot be edited or deleted there), Pending (only while Manual review is on), Settings, roster, allocation, manager passcodes. |
 | Developer | Same sign-in with `DEV_PASSWORD`. | Same as WFM, and the key keeps working if the admin passcode is lost. The header shows Developer. |
 
 Manager passcodes are set by WFM in Settings > Manager sign-in (hashed in the `managers` collection). Names come from the Current Manager column of the roster.
@@ -118,7 +119,7 @@ Agents see a bell next to their name on the PTO Dashboard, with a count of new m
 - their manager has not answered a day before the approval window ends (the request is rejected automatically at the deadline);
 - a request was rejected because the manager did not answer in time;
 - the Admin approved or rejected their override request;
-- an override request was still not reviewed on the day before the requested date, so the system rejected it automatically that day (the message names the date it was closed and says the date is denied).
+- an override request was still not reviewed by the cut-off before the requested date (24 hours by default; the Admin sets it in Settings), so the system rejected it automatically (the message names when it was closed and says the date is denied).
 
 These checks run whenever anyone has the app open (the keep-awake job in `.github/workflows` keeps that frequent). Messages are stored on the request in a `notices` list.
 

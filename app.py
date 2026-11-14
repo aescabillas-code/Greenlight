@@ -34,7 +34,11 @@ from pymongo.errors import DuplicateKeyError
 
 from greenlight_rules import evaluate, resolve_allocation
 
-st.set_page_config(page_title="Greenlight", layout="wide", initial_sidebar_state="collapsed")
+# Browser tab: the Greenlight logo, then the name in script letters (a tab title cannot use a web font,
+# so it uses the Unicode script alphabet, which every browser shows as cursive).
+_LOGO = Path(__file__).with_name("greenlight_logo.png")
+st.set_page_config(page_title="\U0001d4d6\U0001d4fb\U0001d4ee\U0001d4ee\U0001d4f7\U0001d4f5\U0001d4f2\U0001d4f0\U0001d4f1\U0001d4fd",
+                   page_icon=str(_LOGO) if _LOGO.exists() else "🟢", layout="wide", initial_sidebar_state="collapsed")
 
 # Let the app fill the window: hide Streamlit's own chrome and stretch the component.
 st.markdown(
@@ -67,11 +71,11 @@ ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 ISO_MONTH = re.compile(r"^\d{4}-\d{2}$")
 ADMIN_ACTIONS = {
     "saveSettings", "setDefault", "setDefaults", "setRequired", "changePassword", "setOverride", "clearOverrides", "uploadRoster",
-    "editRequest", "deleteRequest",
 }
-OVERRIDE_ACTIONS = {"overrideRequest", "declineOverride", "bulkOverride"}  # decided by the Admin role (or the developer key)
+OVERRIDE_ACTIONS = {"overrideRequest", "declineOverride", "bulkOverride", "saveOvrSettings"}  # decided by the Admin role (or the developer key)
 MANAGER_ACTIONS = {"mgrDecide", "mgrBulk"}
 MGR_MAX_DEFAULT = 72        # the manager approval window in hours (WFM can change it in Settings)
+OVR_REJECT_DEFAULT = 24     # unreviewed override requests close this many hours before the requested date (Admin Settings)
 SESSION_DAYS = 30           # how long a sign-in lasts until the person signs out
 HELD = ("approved", "awaiting")  # statuses that use up a slot
 ROSTER_FIELDS = ("name", "manager", "region", "department", "work_days", "shift")
@@ -118,6 +122,7 @@ def get_settings(db) -> dict:
         "min_notice_days": int(cfg.get("min_notice_days", 14)),
         "timezone": cfg.get("timezone", "Asia/Manila"),
         "mgr_max_hours": int(cfg.get("mgr_max_hours", MGR_MAX_DEFAULT)),
+        "ovr_reject_hours": int(cfg.get("ovr_reject_hours", OVR_REJECT_DEFAULT)),
     }
 
 
@@ -158,7 +163,8 @@ def sweep(db) -> int:
     """Time-based steps, run whenever anyone has the app open:
     1. a day before the manager deadline, remind the agent their manager has not answered yet;
     2. at the deadline, reject the request (the held slot is freed) and tell the agent;
-    3. an override request the Admin has not answered by the day before the date is rejected, and the agent is told."""
+    3. an override request the Admin has not answered by the cut-off (24 hours before the date unless the Admin
+       changes it in Settings) is rejected, and the agent is told."""
     now = datetime.now(timezone.utc)
     changed = 0
     r1 = db.requests.update_many(
@@ -169,9 +175,12 @@ def sweep(db) -> int:
         {"$set": {"status": "rejected", "reason": "No manager response before the deadline", "decided_by": "system",
                   "mgr_status": "expired", "decided_at": now},
          "$push": {"notices": agent_notice("mgr_expired", now)}})
-    tomorrow = (date.fromisoformat(today_iso(db)) + timedelta(days=1)).isoformat()
+    # A date "starts" at midnight in the app timezone; the request closes ovr_reject_hours before that.
+    cfg = get_settings(db)
+    local_now = datetime.now(ZoneInfo(safe_zone(cfg["timezone"])))
+    last_date = (local_now + timedelta(hours=cfg["ovr_reject_hours"])).date().isoformat()
     r3 = db.requests.update_many(
-        {"override_status": "open", "date": {"$lte": tomorrow}},
+        {"override_status": "open", "date": {"$lte": last_date}},
         {"$set": {"status": "rejected", "override_status": "expired", "decided_by": "system",
                   "reason": "Override request not reviewed in time", "decided_at": now},
          "$push": {"notices": agent_notice("ovr_expired", now)}})
@@ -627,6 +636,10 @@ def handle(db, event: dict) -> dict:
     elif kind in OVERRIDE_ACTIONS:
         if not can_override:
             return {"error": "Only the Admin can decide override requests."}
+        if kind == "saveOvrSettings":
+            hours = max(1, min(336, int(payload.get("ovr_reject_hours", OVR_REJECT_DEFAULT))))
+            db.settings.update_one({"_id": "config"}, {"$set": {"ovr_reject_hours": hours}}, upsert=True)
+            return {"ok": True}
     elif kind not in ADMIN_ACTIONS:
         return {"error": "Unknown action."}
     elif not st.session_state.get("is_admin"):
