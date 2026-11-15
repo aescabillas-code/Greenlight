@@ -1027,6 +1027,8 @@ body.busy .btn.primary.working{opacity:1}
 .wdots button{width:9px;height:9px;border-radius:999px;border:0;padding:0;background:color-mix(in srgb,var(--fg) 20%,transparent);cursor:pointer;transition:width .2s,background .2s}
 .wdots button.on{width:26px;background:var(--c)}
 @media (max-width:640px){.wslides{gap:0}.wnav{position:absolute;top:28%;z-index:2;width:40px;height:40px;font-size:24px}.wnav.prev{left:6px}.wnav.next{right:6px}}
+.credit{margin-top:auto;padding-top:6px;font-size:12px;letter-spacing:.04em;color:var(--muted);text-align:center}
+.credit b{font-weight:700;color:var(--accent-ink)}
 </style>
 </head>
 <body>
@@ -1521,7 +1523,7 @@ function enterRole(role){
 }
 function viewLanding(){
   return '<div class="landing"><div><p class="welc">Welcome to</p><h1 class="brandname">Greenlight</h1></div><p class="lead">' + (UI.chosenRole ? 'You picked ' + ROLE_INFO[UI.chosenRole][0] + '.' : 'Choose your role to get started.') + '</p><div class="roles">' +
-    ['gsd', 'manager', 'wfm', 'ovadmin'].filter(function(r){ return !UI.chosenRole || r === UI.chosenRole; }).map(function(r){ return '<button class="role ' + r + '" data-act="pickRole" data-v="' + r + '"><span class="circ">' + ROLE_ICON[r] + '</span><b>' + ROLE_INFO[r][0] + '</b><span class="cap">' + ROLE_INFO[r][1] + '</span></button>'; }).join('') + '</div>' + (UI.chosenRole ? '<button class="btn ghost" data-act="rechoose">← Choose a different role</button>' : '') + '</div>';
+    ['gsd', 'manager', 'wfm', 'ovadmin'].filter(function(r){ return !UI.chosenRole || r === UI.chosenRole; }).map(function(r){ return '<button class="role ' + r + '" data-act="pickRole" data-v="' + r + '"><span class="circ">' + ROLE_ICON[r] + '</span><b>' + ROLE_INFO[r][0] + '</b><span class="cap">' + ROLE_INFO[r][1] + '</span></button>'; }).join('') + '</div>' + (UI.chosenRole ? '<button class="btn ghost" data-act="rechoose">← Choose a different role</button>' : '') + '<p class="credit">Developed by <b>Arianne Escabillas</b></p></div>';
 }
 function keyRule(){
   var t = S.settings, mx = t.mgr_max_hours || 72;
