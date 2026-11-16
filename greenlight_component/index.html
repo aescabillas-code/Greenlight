@@ -1071,6 +1071,19 @@ body.busy .btn.primary.working{opacity:1}
 .cdbox{max-height:min(46vh,380px);overflow:auto}
 .cdt{width:100%;font-size:12px} .cdt th{position:sticky;top:0;background:var(--surface);z-index:1} .cdt td,.cdt th{padding:6px 8px;text-align:left}
 .cdt td.muted{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* v16: manager passcode set-up / reset */
+.msetup{min-height:calc(100dvh - 160px);display:grid;place-items:center;padding-block:24px}
+.msetupcard{width:min(460px,100%);display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px;padding:28px 24px}
+.msetupcard h1{font-size:26px;margin:0} .msetupcard p{margin:0;line-height:1.5}
+.msetupcard .msform{width:100%;display:flex;flex-direction:column;gap:12px;text-align:left}
+.msetupcard .actions{justify-content:flex-end;width:100%}
+.mav.big{width:64px;height:64px;font-size:20px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:700;background:var(--c);box-shadow:0 0 0 6px color-mix(in srgb,var(--c) 18%,transparent)}
+.msico{font-size:36px}
+.linkbtn.forgot{align-self:flex-start;margin-top:-6px}
+.mgrt td.mgract{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.mgrt tr.askreset td{background:color-mix(in srgb,var(--warn) 8%,transparent)}
+.mgrt td .pill{margin-right:4px}
 </style>
 </head>
 <body>
@@ -1275,6 +1288,12 @@ function mgrDeadline(sub, iso, notice, now, cfg){
   return sub + (cfg.mgr_max_hours || 72) * 36e5;
 }
 function winOff(){ return !!(S && S.settings && S.settings.mgr_window_off); }
+/* After a set-up link is used, drop ?mgrsetup= from the address bar so a refresh or bookmark opens the app itself. */
+function cleanSetupUrl(){ [window.top, window.parent].forEach(function(w){ try { var u = new URL(w.location.href); if (u.searchParams.has('mgrsetup')){ u.searchParams.delete('mgrsetup'); w.history.replaceState(w.history.state, '', u.pathname + (u.search || '') + u.hash); } } catch (e){} }); }
+function appBase(){ var b = '';
+  try { b = window.parent.location.href; } catch (e){}
+  if (!b) try { b = document.referrer; } catch (e){}
+  return String(b || '').split(/[?#]/)[0].replace('/~/+', ''); }
 function settingsPayload(o){ var t = S.settings; return Object.assign({approval_mode:t.approval_mode, min_notice_days:t.min_notice_days, mgr_max_hours:t.mgr_max_hours || 72, mgr_window_off:!!t.mgr_window_off, timezone:curTZ()}, o); }
 var mgrNames = function(){ return uniq(function(x){ return x.manager; }).filter(Boolean); };
 var mgrColor = function(n){ return 'var(--rg' + (Math.max(0, mgrNames().indexOf(n)) % 4 + 1) + ')'; };
@@ -1321,7 +1340,7 @@ function applyState(st){
 /* ---------- backends ---------- */
 var backend;
 function demoBackend(){
-  var DB = seed(), pass = 'admin'; DB.mgrPass = {};
+  var DB = seed(), pass = 'admin'; DB.mgrPass = {}; DB.mgrLinks = {}; DB.mgrReset = {}; DB.setup = null;
   var find = function(id){ return DB.requests.find(function(q){ return q.id === id; }); };
   var countUsed = function(d, r, iso){ return DB.requests.filter(function(q){ return (q.status === 'approved' || q.status === 'awaiting') && q.department === d && q.region === r && q.date === iso; }).length; };
   var H = {
@@ -1375,7 +1394,14 @@ function demoBackend(){
         q.date = iso; q.mgr_deadline = dl ? new Date(dl).toISOString() : '';
       }
       q.note = note; return {ok:true}; },
-    setManagerPasscode: function(p){ if (String(p.passcode || '').length < 8) return {error:'Use 8 characters or more for the passcode.'}; DB.mgrPass[p.name] = String(p.passcode); return {ok:true}; },
+    managerLink: function(p){ var t = uid() + uid(); Object.keys(DB.mgrLinks).forEach(function(k){ if (DB.mgrLinks[k].name === p.name) delete DB.mgrLinks[k]; }); DB.mgrLinks[t] = {name:p.name, exp:Date.now() + 48 * 36e5}; delete DB.mgrReset[p.name]; return {ok:true, token:t, expires:new Date(DB.mgrLinks[t].exp).toISOString(), base:'https://your-greenlight-app.streamlit.app/'}; },
+    demoOpenLink: function(p){ var l = DB.mgrLinks[p.token]; DB.setup = l ? {ok:true, name:l.name, reset:true} : {ok:false, reason:'used'}; return {ok:true}; },
+    mgrSetup: function(p){ var l = DB.mgrLinks[p.token]; if (!l) return {error:'This link has expired or was already used. Ask WFM for a new one.'}; if (String(p.passcode || '').length < 8) return {error:'Use 8 characters or more for the passcode.'};
+      DB.mgrPass[l.name] = String(p.passcode); delete DB.mgrLinks[p.token]; delete DB.mgrReset[l.name]; DB.setup = null; DB.isManager = true; DB.managerName = l.name; DB.isAdmin = false; DB.isDev = false; DB.isOvAdmin = false; return {ok:true, name:l.name}; },
+    mgrSetupDismiss: function(){ DB.setup = null; return {ok:true}; },
+    mgrForgot: function(p){ if (!DB.roster.some(function(x){ return x.manager === p.name; })) return {error:'That manager is not on the roster.'}; DB.mgrReset[p.name] = new Date().toISOString(); return {ok:true}; },
+    mgrChangePass: function(p){ if (!DB.isManager) return {error:'Sign in as a manager first.'}; if (p.current !== (DB.mgrPass[DB.managerName] || 'manager')) return {error:'The current passcode is not right.'}; if (String(p.next || '').length < 8) return {error:'Use 8 characters or more for the new passcode.'}; DB.mgrPass[DB.managerName] = String(p.next); return {ok:true}; },
+    setManagerPasscode: function(p){ delete DB.mgrReset[p.name]; if (String(p.passcode || '').length < 8) return {error:'Use 8 characters or more for the passcode.'}; DB.mgrPass[p.name] = String(p.passcode); return {ok:true}; },
     saveOvrSettings: function(p){ DB.settings.ovr_reject_hours = clampInt(p.ovr_reject_hours == null ? 24 : p.ovr_reject_hours, 1, 336); return {ok:true}; },
     saveSettings: function(p){ DB.settings.approval_mode = p.approval_mode === 'manual' ? 'manual' : 'auto'; DB.settings.min_notice_days = clampInt(p.min_notice_days, 0, 365); DB.settings.mgr_max_hours = clampInt(p.mgr_max_hours == null ? 72 : p.mgr_max_hours, 1, 168);
       var wasOff = !!DB.settings.mgr_window_off, nowOff = !!p.mgr_window_off; DB.settings.mgr_window_off = nowOff;
@@ -1416,12 +1442,12 @@ function demoBackend(){
     editRequest: function(p){ var q = find(p.id); if (!q) return {error:'That request no longer exists.'}; if (p.status !== q.status){ q.reason = 'Edited by admin'; q.decided_by = 'admin'; } q.date = p.date; q.status = p.status; q.note = String(p.note || '').trim(); return {ok:true}; },
     deleteRequest: function(p){ var n = DB.requests.length; DB.requests = DB.requests.filter(function(q){ return q.id !== p.id; }); return n === DB.requests.length ? {error:'That request no longer exists.'} : {ok:true}; }
   };
-  var ADMIN = ['setManagerPasscode','saveSettings','setDefaults','setRequired','changePassword','setDefault','setOverride','clearOverrides','uploadRoster'], OVR = ['overrideRequest','declineOverride','bulkOverride','saveOvrSettings'];
+  var ADMIN = ['managerLink','setManagerPasscode','saveSettings','setDefaults','setRequired','changePassword','setDefault','setOverride','clearOverrides','uploadRoster'], OVR = ['overrideRequest','declineOverride','bulkOverride','saveOvrSettings'];
   var fn = function(type, payload){
     return new Promise(function(res){ setTimeout(function(){
       var r = !H[type] ? {error:'Unknown action.'} : (ADMIN.indexOf(type) >= 0 && !DB.isAdmin) ? {error:'Admin sign-in required.'} : (OVR.indexOf(type) >= 0 && !(DB.isOvAdmin || DB.isDev)) ? {error:'Only the Admin can decide override requests.'} : (type === 'decide' && !DB.isAdmin && !DB.isOvAdmin) ? {error:'Admin sign-in required.'} : (type === 'decide' && !DB.isDev && !DB.isOvAdmin && (find((payload || {}).id) || {}).override_status === 'open') ? {error:'Override requests are decided by the Admin.'} : (type === 'decide' && !DB.isAdmin && (find((payload || {}).id) || {}).override_status !== 'open') ? {error:'Admin sign-in required.'} : H[type](payload || {});
       demoSweep();
-      DB.managers = Array.from(new Set(DB.roster.map(function(a){ return a.manager; }))).filter(Boolean).sort().map(function(n){ return {name:n, set:true}; });
+      DB.managers = Array.from(new Set(DB.roster.map(function(a){ return a.manager; }))).filter(Boolean).sort().map(function(n){ var lk = Object.keys(DB.mgrLinks).map(function(k){ return DB.mgrLinks[k]; }).find(function(l){ return l.name === n; }); return {name:n, set:true, reset_at:DB.mgrReset[n] || '', link_until:lk ? new Date(lk.exp).toISOString() : ''}; });
       applyState(JSON.parse(JSON.stringify(DB))); res(r);
     }, 160); });
   };
@@ -1545,14 +1571,14 @@ function chrome(){
   document.body.classList.toggle('gsdlogin', bare);
   if (bare){ $('#nav').innerHTML = ''; $('#who').innerHTML = ''; return; }
   var inside = S.isAdmin || S.isManager || S.isOvAdmin || !!agent();
-  if (UI.view === 'landing' || (UI.view === 'welcome' && !inside)){ $('#nav').innerHTML = ''; $('#who').innerHTML = ''; return; }
+  if (UI.view === 'landing' || UI.view === 'mgrsetup' || (UI.view === 'welcome' && !inside)){ $('#nav').innerHTML = ''; $('#who').innerHTML = ''; return; }
   var tabs = [['welcome','Guide']].concat(S.isOvAdmin && !S.isAdmin ? [] : [['request','PTO Dashboard']]);
   if (S.isManager){ var an = awaitingMine().length; tabs.push(['approvals', 'Approvals' + (an ? '<span class="badge">' + an + '</span>' : '')]); }
-  if (S.isAdmin){ var pn = S.requests.filter(function(q){ return q.status === 'pending'; }).length; if (pendTab()) tabs.push(['pending','Pending' + (pn ? '<span class="badge">' + pn + '</span>' : '')]); var on = openOvr().length; if (ovrTab()) tabs.push(['overrides','Override requests' + (on ? '<span class="badge">' + on + '</span>' : '')]); tabs.push(['setup','Settings']); }
+  if (S.isAdmin){ var pn = S.requests.filter(function(q){ return q.status === 'pending'; }).length; if (pendTab()) tabs.push(['pending','Pending' + (pn ? '<span class="badge">' + pn + '</span>' : '')]); var on = openOvr().length; if (ovrTab()) tabs.push(['overrides','Override requests' + (on ? '<span class="badge">' + on + '</span>' : '')]); var rsN = (S.managers || []).filter(function(m){ return m.reset_at; }).length; tabs.push(['setup','Settings' + (rsN ? '<span class="badge" title="Managers asking for a passcode reset">' + rsN + '</span>' : '')]); }
   else if (S.isOvAdmin){ var on2 = openOvr().length; tabs.push(['overrides','Override requests' + (on2 ? '<span class="badge">' + on2 + '</span>' : '')], ['reports','Reports'], ['ovsettings','Settings']); }
   if (S.isDev) tabs.push(['reports','Reports'], ['ovsettings','Admin settings']);
   $('#nav').innerHTML = tabs.map(function(t){ return '<button class="tab' + (UI.view === t[0] ? ' on' : '') + '" data-act="' + (t[0] === 'welcome' ? 'guide' : 'go') + '" data-v="' + t[0] + '">' + t[1] + '</button>'; }).join('');
-  $('#who').innerHTML = (S.isAdmin ? '<span class="pill ' + (S.isDev ? 'override">Developer' : 'approved">WFM') + '</span><button class="btn ghost sm" data-act="logout">Sign out</button>' : S.isOvAdmin ? '<span class="pill approved">Admin</span><button class="btn ghost sm" data-act="logout">Sign out</button>' : S.isManager ? '<span class="pill approved">Manager</span><span class="small muted">' + esc(S.managerName) + '</span><button class="btn ghost sm" data-act="logout">Sign out</button>' : UI.agentId && agent() ? (function(){ var u = ntfUnread(); return '<button class="bell' + (u ? ' has' : '') + '" data-act="openNtf" aria-label="Notifications' + (u ? ', ' + u + ' new' : '') + '"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>' + (u ? '<i class="tn">' + u + '</i>' : '') + '</button>'; })() + '<span class="pill approved">GSD</span><span class="small muted">' + esc(agent().name) + '</span><button class="btn ghost sm" data-act="logout">Sign out</button>' : '<button class="btn ghost sm" data-act="openLogin">Staff sign in</button>');
+  $('#who').innerHTML = (S.isAdmin ? '<span class="pill ' + (S.isDev ? 'override">Developer' : 'approved">WFM') + '</span><button class="btn ghost sm" data-act="logout">Sign out</button>' : S.isOvAdmin ? '<span class="pill approved">Admin</span><button class="btn ghost sm" data-act="logout">Sign out</button>' : S.isManager ? '<span class="pill approved">Manager</span><span class="small muted">' + esc(S.managerName) + '</span><button class="btn ghost sm" data-act="mgrChg">Change passcode</button><button class="btn ghost sm" data-act="logout">Sign out</button>' : UI.agentId && agent() ? (function(){ var u = ntfUnread(); return '<button class="bell' + (u ? ' has' : '') + '" data-act="openNtf" aria-label="Notifications' + (u ? ', ' + u + ' new' : '') + '"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>' + (u ? '<i class="tn">' + u + '</i>' : '') + '</button>'; })() + '<span class="pill approved">GSD</span><span class="small muted">' + esc(agent().name) + '</span><button class="btn ghost sm" data-act="logout">Sign out</button>' : '<button class="btn ghost sm" data-act="openLogin">Staff sign in</button>');
 }
 var ROLE_ICON = {
   gsd:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/><path d="M19 20c0 1.5-2 2-5 2"/></svg>',
@@ -1571,6 +1597,17 @@ function enterRole(role){
   if (role === 'ovadmin'){ if (canOvr()) return go('overrides'); UI.loginRole = 'ovadmin'; return openModal({type:'login'}); }
   if (S.isAdmin) return go('request');
   UI.loginRole = 'admin'; openModal({type:'login'});
+}
+/* Opened from a manager set-up / reset link: choose a passcode, then you are signed in. */
+function viewMgrSetup(){
+  var su = S.setup || {};
+  if (!su.ok) return '<section class="msetup"><div class="glass msetupcard"><span class="msico" aria-hidden="true">⌛</span><h1>This link no longer works</h1><p class="muted">' + (su.reason === 'expired' ? 'Set-up links work for ' + 48 + ' hours. This one has expired.' : 'It was already used, or WFM made a newer link.') + ' Ask WFM for a new link, or sign in with your passcode if you already set one.</p><div class="actions"><button class="btn primary" data-act="setupDismiss">Go to Greenlight</button></div></div></section>';
+  return '<section class="msetup"><div class="glass msetupcard"><span class="mav big" style="--c:' + mgrColor(su.name) + '" aria-hidden="true">' + esc(initials(su.name)) + '</span>' +
+    '<h1>' + (su.reset ? 'Reset your passcode' : 'Set your passcode') + '</h1><p class="muted">Hi ' + esc(su.name.split(' ')[0]) + '. Choose the passcode you will use to sign in as a manager on Greenlight. Keep it to yourself.</p>' +
+    '<form data-form="msetup" class="msform"><input type="text" autocomplete="username" value="' + esc(su.name) + '" hidden><label class="field"><span>New passcode (8+ characters)</span><input class="input" type="password" id="msNew" autocomplete="new-password" autofocus></label>' +
+    '<label class="field"><span>New passcode again</span><input class="input" type="password" id="msNew2" autocomplete="new-password"></label>' +
+    '<div class="actions"><button type="button" class="btn ghost" data-act="setupDismiss">Not now</button><button class="btn primary">Save and sign in</button></div></form>' +
+    '<p class="small muted">This link works once. If you forget your passcode later, tap Forgot passcode on the sign-in screen and WFM will send you a new link.</p></div></section>';
 }
 function viewLanding(){
   return '<div class="landing"><div><p class="welc">Welcome to</p><h1 class="brandname">Greenlight</h1></div><p class="lead">' + (UI.chosenRole ? 'You picked ' + ROLE_INFO[UI.chosenRole][0] + '.' : 'Choose your role to get started.') + '</p><div class="roles">' +
@@ -1636,8 +1673,9 @@ function viewWelcome(){
 }
 function render(){
   if (!S || UI.picking) return;
+  if (S.setup && !UI.setupSkip && !S.isManager) UI.view = 'mgrsetup'; else if (UI.view === 'mgrsetup') UI.view = S.isManager ? 'welcome' : 'landing';
   chrome();
-  var views = {request:function(){ return S.isAdmin || S.isManager ? viewDashboard() : viewRequest(); }, approvals:viewApprovals, reports:viewReports, ovsettings:viewOvrSettings, pending:viewPending, overrides:viewOverrides, manage:viewManage, setup:viewSetup, landing:viewLanding, welcome:viewWelcome};
+  var views = {request:function(){ return S.isAdmin || S.isManager ? viewDashboard() : viewRequest(); }, approvals:viewApprovals, reports:viewReports, ovsettings:viewOvrSettings, pending:viewPending, overrides:viewOverrides, manage:viewManage, setup:viewSetup, landing:viewLanding, welcome:viewWelcome, mgrsetup:viewMgrSetup};
   var y = getY();
   $('#main').innerHTML = (MODE === 'demo' ? '<div class="demo">' + (STANDALONE ? '<b>Opened on its own, outside the Streamlit app.</b> To save to MongoDB, run <code>streamlit run app.py</code> and open the address it shows. ' : '') + 'Preview with sample data. Nothing you do here is saved. WFM passcode: <b>admin</b> · Admin passcode: <b>overrides</b> · Developer key: <b>dev</b> · Manager: choose a name, passcode <b>manager</b></div>' : '') + views[UI.view]();
   scrollToY(y);
@@ -2115,8 +2153,8 @@ function viewSetup(){
     '<button class="btn primary">Change passcode</button></form></div></section>';
 
   var teamN = {}; S.roster.forEach(function(a){ teamN[a.manager] = (teamN[a.manager] || 0) + 1; });
-  var mgrSect = '<section class="sect"><header><h2>Manager sign-in</h2><p>Managers answer their team requests first. Set a passcode for each manager (8+ characters). They sign in from Staff sign in. Names come from the roster.</p></header><div>' +
-    ((S.managers || []).length ? '<div class="box"><table><thead><tr><th>Manager</th><th>Agents</th><th>Passcode</th><th></th></tr></thead><tbody>' + S.managers.map(function(m){ return '<tr><td>' + esc(m.name) + '</td><td class="tn">' + (teamN[m.name] || 0) + '</td><td>' + (m.set ? 'Set' : '<span class="muted">Not set</span>') + '</td><td><button class="btn sm" data-act="mgrPass" data-n="' + esc(m.name) + '">' + (m.set ? 'Reset passcode' : 'Set passcode') + '</button></td></tr>'; }).join('') + '</tbody></table></div>' : '<p class="empty">Upload a roster first. Managers come from the Current Manager column.</p>') + '</div></section>';
+  var mgrSect = '<section class="sect"><header><h2>Manager sign-in</h2><p>Managers answer their team requests first. Send each manager a set-up link so they choose their own passcode, or type one for them. A manager who forgets it taps Forgot passcode, shows up here, and you send a reset link. Links work once, for 48 hours. Names come from the roster.</p></header><div>' +
+    ((S.managers || []).length ? '<div class="box"><table class="mgrt"><thead><tr><th>Manager</th><th>Agents</th><th>Passcode</th><th></th></tr></thead><tbody>' + S.managers.slice().sort(function(a, b){ return (b.reset_at ? 1 : 0) - (a.reset_at ? 1 : 0); }).map(function(m){ return '<tr' + (m.reset_at ? ' class="askreset"' : '') + '><td>' + esc(m.name) + '</td><td class="tn">' + (teamN[m.name] || 0) + '</td><td>' + (m.set ? '<span class="pill approved">Set</span>' : '<span class="pill cancelled">Not set</span>') + (m.reset_at ? ' <span class="pill awaiting">Forgot passcode · ' + esc(fmtStamp(m.reset_at)) + '</span>' : '') + (m.link_until ? ' <span class="small muted">Link open until ' + esc(fmtStamp(m.link_until)) + '</span>' : '') + '</td><td class="mgract"><button class="btn sm' + (m.reset_at || !m.set ? ' primary' : '') + '" data-act="mgrLink" data-n="' + esc(m.name) + '">' + (m.set ? 'Send reset link' : 'Send set-up link') + '</button><button class="btn ghost sm" data-act="mgrPass" data-n="' + esc(m.name) + '">Type passcode</button></td></tr>'; }).join('') + '</tbody></table></div>' : '<p class="empty">Upload a roster first. Managers come from the Current Manager column.</p>') + '</div></section>';
   var dr = UI.draft, ptoN = {}, yr = S.today.slice(0, 4);
   S.requests.forEach(function(q){ if (q.status === 'approved' && q.date.slice(0, 4) === yr) ptoN[q.employee_id] = (ptoN[q.employee_id] || 0) + 1; });
   var roster = '<section class="sect"><header><h2>Roster</h2><p>The people who can request time off, with their work schedule and rest days. Departments and regions come from this list.</p></header><div>' +
@@ -2456,7 +2494,7 @@ function renderModal(keep){
   else if (m.type === 'login'){
     var role = UI.loginRole === 'ovadmin' ? 'ovadmin' : UI.loginRole === 'admin' ? 'admin' : 'manager';
     h = shell(role === 'manager' ? 'Manager sign in' : role === 'ovadmin' ? 'Admin sign in' : 'WFM sign in', role === 'manager' ? 'Enter the passcode WFM gave you. You stay signed in on this device until you sign out.' : role === 'ovadmin' ? 'Enter the Admin passcode. Developers use their developer key here. You stay signed in on this device until you sign out.' : 'Enter the WFM passcode. Developers use their developer key here. You stay signed in on this device until you sign out.',
-      '<form data-form="login" style="display:flex;flex-direction:column;gap:14px">' + (role === 'manager' ? '<div class="mgrme"><span class="mav" style="--c:' + mgrColor(UI.loginMgr) + '" aria-hidden="true">' + esc(initials(UI.loginMgr)) + '</span><div class="grow"><b>' + esc(UI.loginMgr) + '</b><br><button type="button" class="linkbtn" data-act="mgrAgain">Not you? Choose another profile</button></div></div><input type="hidden" id="mgrName" value="' + esc(UI.loginMgr) + '">' : '') + '<label class="field"><span>Passcode</span><input class="input" type="password" id="adminPass" autocomplete="current-password" autofocus></label><div class="actions"><button type="button" class="btn ghost" data-act="closeModal">Cancel</button><button class="btn primary">Sign in</button></div></form>');
+      '<form data-form="login" style="display:flex;flex-direction:column;gap:14px">' + (role === 'manager' ? '<div class="mgrme"><span class="mav" style="--c:' + mgrColor(UI.loginMgr) + '" aria-hidden="true">' + esc(initials(UI.loginMgr)) + '</span><div class="grow"><b>' + esc(UI.loginMgr) + '</b><br><button type="button" class="linkbtn" data-act="mgrAgain">Not you? Choose another profile</button></div></div><input type="hidden" id="mgrName" value="' + esc(UI.loginMgr) + '">' : '') + '<label class="field"><span>Passcode</span><input class="input" type="password" id="adminPass" autocomplete="current-password" autofocus></label>' + (role === 'manager' ? '<button type="button" class="linkbtn forgot" data-act="mgrForgot">Forgot passcode? Ask WFM for a reset link</button>' : '') + '<div class="actions"><button type="button" class="btn ghost" data-act="closeModal">Cancel</button><button class="btn primary">Sign in</button></div></form>');
   }
   else if (m.type === 'mgr'){
     var wq = m.ids.map(function(id){ return S.requests.find(function(x){ return x.id === id; }); }).filter(Boolean), apv = m.action === 'approve';
@@ -2470,6 +2508,17 @@ function renderModal(keep){
     if (!cq){ UI.modal = null; root.innerHTML = ''; still = false; return; }
     h = shell('Cancel approved time off', esc(cq.name) + ' · ' + fmtDate(cq.date), '<p class="note warn">The slot goes back to the team and the agent sees the request as cancelled.</p><label class="field"><span>Reason (optional)</span><textarea class="input" id="mcReason" autofocus></textarea></label><div class="actions"><button class="btn ghost" data-act="closeModal">Keep it</button><button class="btn danger" data-act="doMgrCancel">Cancel request</button></div>');
   }
+  else if (m.type === 'mlink'){
+    var url = m.url || '';
+    h = shell((m.reset ? 'Reset link for ' : 'Set-up link for ') + esc(m.name), 'Send this to ' + esc(m.name.split(' ')[0]) + ' by chat or email. It works once, until ' + esc(fmtStamp(m.expires)) + '.',
+      (m.loading ? '<p class="muted"><span class="spin" aria-hidden="true"></span> Making the link…</p>' :
+      '<label class="field"><span>Link</span><div class="bar"><input class="input grow" id="mlUrl" readonly value="' + esc(url) + '" onfocus="this.select()"><button class="btn primary sm" data-act="copyLink">Copy link</button></div></label>' +
+      '<p class="small muted">Opening it lets ' + esc(m.name.split(' ')[0]) + ' choose a passcode and signs them in. ' + (m.reset ? 'Their old passcode keeps working until they set the new one.' : '') + ' Making another link cancels this one.</p>' +
+      (MODE === 'demo' ? '<p class="note">Preview only: links do not open from here. <button class="linkbtn" data-act="demoOpenLink" data-t="' + esc(m.token) + '">Open it in this preview</button> to see what the manager sees.</p>' : '')) +
+      '<div class="actions"><button class="btn ghost" data-act="closeModal">Done</button></div>');
+  }
+  else if (m.type === 'mforgot') h = shell('WFM has been told', esc(m.name), '<p>WFM can see that you asked for a passcode reset. They will send you a link to choose a new passcode. Your current passcode, if you remember it later, still works.</p><div class="actions"><button class="btn primary" data-act="closeModal">OK</button></div>');
+  else if (m.type === 'mchg') h = shell('Change your passcode', esc(S.managerName), '<form data-form="mchg" style="display:flex;flex-direction:column;gap:14px"><label class="field"><span>Current passcode</span><input class="input" type="password" id="mcCur" autocomplete="current-password" autofocus></label><label class="field"><span>New passcode (8+ characters)</span><input class="input" type="password" id="mcNew" autocomplete="new-password"></label><label class="field"><span>New passcode again</span><input class="input" type="password" id="mcNew2" autocomplete="new-password"></label><div class="actions"><button type="button" class="btn ghost" data-act="closeModal">Cancel</button><button class="btn primary">Change passcode</button></div></form>');
   else if (m.type === 'mpass') h = shell('Passcode for ' + esc(m.name), 'Share it with this manager. They sign in from Staff sign in, Manager.', '<form data-form="mpass" style="display:flex;flex-direction:column;gap:14px"><label class="field"><span>New passcode (8+ characters)</span><input class="input" type="text" id="mpPass" autocomplete="off" autofocus></label><div class="actions"><button type="button" class="btn ghost" data-act="closeModal">Cancel</button><button class="btn primary">Save passcode</button></div></form>');
   else if (m.type === 'ntf'){ h = ntfModal(); }
   else if (m.type === 'summary'){
@@ -2590,6 +2639,16 @@ var ACT = {
   lowLess: function(){ UI.lowN = 12; render(); },
   openNtf: function(){ var a = agent(); if (!a) return; UI.ntfSeenAt = ntfSeen(); var top = myNotices()[0]; lsSet('greenlight_ntf_' + a.employee_id, top ? top.n.at : new Date().toISOString()); openModal({type:'ntf'}); chrome(); },
   doMgrCancel: function(){ call('cancelRequest', {id:UI.modal.id, reason:val('mcReason')}).then(function(r){ if (!r.error){ closeModal(); toast('Request cancelled. The slot is open again.'); } }); },
+  mgrLink: function(el){ var n = el.dataset.n, mm = (S.managers || []).find(function(x){ return x.name === n; }) || {};
+    openModal({type:'mlink', name:n, reset:!!mm.set, loading:true});
+    call('managerLink', {name:n}).then(function(r){ if (r.error){ closeModal(); return; } var base = r.base || appBase();
+      UI.modal = {type:'mlink', name:n, reset:!!mm.set, token:r.token, expires:r.expires, url:base + (base.indexOf('?') >= 0 ? '&' : '?') + 'mgrsetup=' + encodeURIComponent(r.token)}; renderModal(); }); },
+  copyLink: function(){ var i = document.getElementById('mlUrl'); if (!i) return; var done = function(){ toast('Link copied'); };
+    try { navigator.clipboard.writeText(i.value).then(done, function(){ i.focus(); i.select(); try { document.execCommand('copy'); done(); } catch (e){ toast('Select the link and copy it.', true); } }); } catch (e){ i.focus(); i.select(); } },
+  demoOpenLink: function(el){ call('demoOpenLink', {token:el.dataset.t}).then(function(){ UI.setupToken = el.dataset.t; UI.setupSkip = false; closeModal(); if (S.isAdmin) call('logout', {}).then(function(){ lsSet('greenlight_token', ''); render(); scrollToY(0); }); }); },
+  setupDismiss: function(){ UI.setupSkip = true; cleanSetupUrl(); call('mgrSetupDismiss', {}).then(function(){ UI.view = 'landing'; render(); scrollToY(0); }); },
+  mgrForgot: function(){ var n = UI.loginMgr; if (!n){ toast('Choose your name first.', true); return; } call('mgrForgot', {name:n}).then(function(r){ if (!r.error) openModal({type:'mforgot', name:n}); }); },
+  mgrChg: function(){ openModal({type:'mchg'}); },
   mgrPass: function(el){ openModal({type:'mpass', name:el.dataset.n}); },
   go: function(el){ UI.view = el.dataset.v; render(); scrollToY(0); },
   dashTeam: function(el){ UI.dashTeam = el.dataset.v; UI.lf.manager = ''; render(); },
@@ -2722,6 +2781,14 @@ document.addEventListener('submit', function(e){ e.preventDefault();
   if (e.target.dataset.form === 'login'){ var role = UI.loginRole === 'ovadmin' ? 'ovadmin' : UI.loginRole === 'admin' ? 'admin' : 'manager', mg = role === 'manager', oa = role === 'ovadmin'; if (mg && !val('mgrName')){ toast('Choose your name.', true); return; } UI.loginMgr = mg ? val('mgrName') : UI.loginMgr;
     var lb = e.target.querySelector('.btn.primary'), lt = lb ? lb.innerHTML : ''; if (lb){ lb.innerHTML = '<span class="spin" aria-hidden="true"></span>Signing in…'; lb.classList.add('working'); }
     call('login', mg ? {role:'manager', manager:val('mgrName'), password:val('adminPass')} : oa ? {role:'ovadmin', password:val('adminPass')} : {password:val('adminPass')}).then(function(r){ if (r.error && lb && document.body.contains(lb)){ lb.innerHTML = lt; lb.classList.remove('working'); } if (!r.error){ if (r.token) lsSet('greenlight_token', r.token); lsSet('greenlight_role', ''); closeModal(); UI.role = mg ? 'manager' : oa ? 'ovadmin' : 'wfm'; UI.view = 'welcome'; UI.fromGuide = false; render(); scrollToY(0); toast(mg ? 'Signed in as manager' : oa ? 'Signed in as Admin' : 'Signed in as WFM'); } }); }
+  if (e.target.dataset.form === 'msetup'){ var n1 = val('msNew');
+    if (n1.length < 8){ toast('Use 8 characters or more for the passcode.', true); return; }
+    if (n1 !== val('msNew2')){ toast('The two passcodes do not match.', true); return; }
+    call('mgrSetup', {passcode:n1, token:UI.setupToken || ''}).then(function(r){ if (r.error) return; if (r.token) lsSet('greenlight_token', r.token); lsSet('greenlight_role', ''); UI.setupSkip = true; UI.setupToken = ''; UI.role = 'manager'; UI.view = 'approvals'; UI.fromGuide = false; cleanSetupUrl(); render(); scrollToY(0); toast('Passcode saved. Welcome to Greenlight, ' + String(r.name || S.managerName || '').split(' ')[0] + '.'); }); return; }
+  if (e.target.dataset.form === 'mchg'){ var c1 = val('mcNew');
+    if (c1.length < 8){ toast('Use 8 characters or more for the new passcode.', true); return; }
+    if (c1 !== val('mcNew2')){ toast('The two new passcodes do not match.', true); return; }
+    call('mgrChangePass', {current:val('mcCur'), next:c1}).then(function(r){ if (!r.error){ closeModal(); toast('Passcode changed'); } }); return; }
   if (e.target.dataset.form === 'mpass') call('setManagerPasscode', {name:UI.modal.name, passcode:val('mpPass')}).then(function(r){ if (!r.error){ closeModal(); toast('Passcode saved'); } }); });
 document.addEventListener('keydown', function(e){
   if (e.key === 'Escape' && UI.modal) closeModal();
