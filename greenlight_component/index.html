@@ -1032,6 +1032,45 @@ body.busy .btn.primary.working{opacity:1}
 @media (max-width:640px){.wslides{gap:0}.wnav{position:absolute;top:28%;z-index:2;width:40px;height:40px;font-size:24px}.wnav.prev{left:6px}.wnav.next{right:6px}}
 .credit{margin-top:auto;padding-top:6px;font-size:12px;letter-spacing:.04em;color:var(--muted);text-align:center}
 .credit b{font-weight:700;color:var(--accent-ink)}
+
+/* v14: inside-notice lines are green; the request details sit on one line */
+.day.soon{background-image:repeating-linear-gradient(135deg,transparent 0 5px,color-mix(in srgb,var(--ok-bg) 52%,transparent) 5px 7px)!important}
+.cal .day.soon:not(.past)::after{background:var(--ok-bg)}
+.cal .day.sel.soon::after{background:var(--pick-fg)}
+#modalRoot .glass.mid:has(.cal):not(:has(.rcal)){width:min(660px,100%)}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .facts{grid-template-columns:auto auto auto minmax(0,1fr) auto!important;border-radius:12px}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .facts>div:nth-child(n){display:flex!important;flex-direction:column;align-items:flex-start;justify-content:center;gap:1px;padding:6px 10px!important;border-bottom:0!important;border-right:1px solid color-mix(in srgb,var(--line) 70%,transparent)!important;background:none!important;grid-column:auto!important;min-width:0}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .facts>div:nth-child(odd){background:color-mix(in srgb,var(--accent) 5%,var(--surface))!important}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .facts>div:last-child{border-right:0!important}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .facts>div>*:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;overflow-wrap:normal;font-size:12.5px}
+@media (max-width:640px){
+  #modalRoot .glass:has(.cal):not(:has(.rcal)) .facts{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  #modalRoot .glass:has(.cal):not(:has(.rcal)) .facts>div:nth-child(n){border-bottom:1px solid color-mix(in srgb,var(--line) 60%,transparent)!important}
+  #modalRoot .glass:has(.cal):not(:has(.rcal)) .facts>div:last-child{grid-column:1/-1!important;border-bottom:0!important}
+  #modalRoot .glass:has(.cal):not(:has(.rcal)) .facts>div>*:last-child{white-space:normal}
+}
+
+/* v15: toggles fit their buttons; tiles in one row; clickable charts */
+.field>.seg,.sect .seg,.panel>.seg{width:fit-content;max-width:100%;align-self:flex-start;display:inline-flex}
+.tiles.row{grid-template-columns:repeat(var(--n,4),minmax(0,1fr))}
+.tiles.row .tile{min-width:0} .tiles.row .tile .k{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:640px){.tiles.row{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.chart .hit[data-act]{cursor:pointer} .chart .hit[data-act]:hover{fill:color-mix(in srgb,var(--accent) 8%,transparent)}
+.donut circle[data-act],.stack i[data-act],.hbars li.clk,.dlegend li.clk,.obars .hl.clk{cursor:pointer}
+.hbars li.clk:hover .hl,.dlegend li.clk:hover span,.obars .hl.clk:hover{color:var(--accent-ink)}
+.stack i[data-act]:hover{filter:brightness(1.1)}
+.hbars li.clk:focus-visible,.dlegend li.clk:focus-visible,.obars .hl.clk:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.chint{margin:-4px 0 6px;font-size:11px}
+#modalRoot .glass.mid.cmod{width:min(760px,100%)}
+.cdkv{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+.cdkv>div{display:flex;flex-direction:column;gap:2px;padding:8px 12px;border-right:1px solid color-mix(in srgb,var(--line) 70%,transparent)}
+.cdkv>div:last-child{border-right:0}
+.cdkv span{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.cdkv b{font-size:16px;color:var(--fg)}
+.cdh{font-size:13px;margin:4px 0 0}
+.cdbox{max-height:min(46vh,380px);overflow:auto}
+.cdt{width:100%;font-size:12px} .cdt th{position:sticky;top:0;background:var(--surface);z-index:1} .cdt td,.cdt th{padding:6px 8px;text-align:left}
+.cdt td.muted{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -1187,9 +1226,12 @@ function parseDates(str){
 var akey = function(d, r, x){ return d + '|' + r + '|' + x; };
 function defaultOf(st, dept, region, ym){ var d = (st.settings.defaults || {})[dept + '|' + region] || {}; return d[ym] != null ? d[ym] : (d['*'] != null ? d['*'] : 0); }
 function requiredOf(st, dept, region, ym){ var d = (st.settings.required || {})[dept + '|' + region] || {}; return d[ym] != null ? d[ym] : (d['*'] != null ? d['*'] : null); }
+function pctOf(st, dept, region, ym){ var d = (st.settings.required_pct || {})[dept + '|' + region] || {}; return d[ym] != null ? d[ym] : (d['*'] != null ? d['*'] : null); }
 function schedOn(st, dept, region, iso){ var wd = DOW[parse(iso).getUTCDay()]; return st.roster.filter(function(a){ return a.department === dept && a.region === region && workDays(a).indexOf(wd) >= 0; }).length; }
 /* Slots for a day: a day typed by hand wins; else, if a required headcount is set, slots = scheduled that day minus required (never below 0); else the default slots. */
-function baseAlloc(st, dept, region, iso){ var req = requiredOf(st, dept, region, iso.slice(0, 7)); return req != null ? Math.max(0, schedOn(st, dept, region, iso) - req) : defaultOf(st, dept, region, iso.slice(0, 7)); }
+/* Agents needed on duty that day: a fixed number, or a percent of the agents scheduled (rounded up). null when neither is set. */
+function needOf(st, dept, region, iso){ var ym = iso.slice(0, 7), pc = pctOf(st, dept, region, ym); if (pc != null) return Math.floor((schedOn(st, dept, region, iso) * pc + 99) / 100); return requiredOf(st, dept, region, ym); }
+function baseAlloc(st, dept, region, iso){ var need = needOf(st, dept, region, iso); return need != null ? Math.max(0, schedOn(st, dept, region, iso) - need) : defaultOf(st, dept, region, iso.slice(0, 7)); }
 function allocIn(st, dept, region, iso){ var o = st.overrides[akey(dept, region, iso)]; return o != null ? o : baseAlloc(st, dept, region, iso); }
 function evaluate(o){
   var lead = diffDays(o.date, o.today), short = lead >= 0 && lead < o.minNotice;
@@ -1229,9 +1271,11 @@ function covLevel(x){ return x.req != null && x.after < x.req ? 'below' : (x.req
 /* The manager has one fixed window to answer (72 hours by default, set by WFM in Settings). */
 function mgrDeadline(sub, iso, notice, now, cfg){
   cfg = cfg || (S && S.settings) || {};
+  if (cfg.mgr_window_off) return 0;   // no window: the request waits for the manager with no deadline
   return sub + (cfg.mgr_max_hours || 72) * 36e5;
 }
-function settingsPayload(o){ var t = S.settings; return Object.assign({approval_mode:t.approval_mode, min_notice_days:t.min_notice_days, mgr_max_hours:t.mgr_max_hours || 72, timezone:curTZ()}, o); }
+function winOff(){ return !!(S && S.settings && S.settings.mgr_window_off); }
+function settingsPayload(o){ var t = S.settings; return Object.assign({approval_mode:t.approval_mode, min_notice_days:t.min_notice_days, mgr_max_hours:t.mgr_max_hours || 72, mgr_window_off:!!t.mgr_window_off, timezone:curTZ()}, o); }
 var mgrNames = function(){ return uniq(function(x){ return x.manager; }).filter(Boolean); };
 var mgrColor = function(n){ return 'var(--rg' + (Math.max(0, mgrNames().indexOf(n)) % 4 + 1) + ')'; };
 function awaitingAll(){ return S.requests.filter(function(q){ return q.status === 'awaiting'; }); }
@@ -1295,7 +1339,7 @@ function demoBackend(){
         var al = allocIn(DB, a.department, a.region, iso), us = countUsed(a.department, a.region, iso);
         var v = evaluate({today:DB.today, date:iso, minNotice:DB.settings.min_notice_days, mode:DB.settings.approval_mode, allocation:al, used:us});
         var ot = !ask || v.status === 'approved' ? '' : v.short ? 'notice' : us >= al ? 'allocation' : '', st0 = v.status, why0 = v.reason, dl = null, now = Date.now();
-        if ((st0 === 'approved' || st0 === 'pending') && !v.short){ dl = mgrDeadline(now, iso, DB.settings.min_notice_days, now, DB.settings); if (dl){ st0 = 'awaiting'; why0 = 'Waiting for manager approval'; } }
+        if ((st0 === 'approved' || st0 === 'pending') && !v.short){ dl = mgrDeadline(now, iso, DB.settings.min_notice_days, now, DB.settings); st0 = 'awaiting'; why0 = 'Waiting for manager approval'; }
         DB.requests.push({id:uid(), mgr_deadline:dl ? new Date(dl).toISOString() : '', employee_id:a.employee_id, name:a.name, manager:a.manager, department:a.department, region:a.region, date:iso, status:st0, reason:why0, short_notice:!!v.short, decided_by:'auto', override_reason:'', override_request:ot ? ask : '', override_status:ot ? 'open' : '', override_type:ot, note:'', submitted_at:new Date().toISOString(), batch_id:batch});
         out.push({date:iso, status:st0, reason:why0, override_requested:!!ot, mgr_deadline:dl ? new Date(dl).toISOString() : ''});
       });
@@ -1327,21 +1371,25 @@ function demoBackend(){
         if (diffDays(iso, DB.today) < DB.settings.min_notice_days) return {error:'That date is inside the minimum notice. Cancel this request and submit a new one instead.'};
         if (DB.requests.some(function(x){ return x !== q && x.employee_id === q.employee_id && x.date === iso && x.status !== 'rejected' && x.status !== 'cancelled'; })) return {error:'You already have a request for that date.'};
         if (DB.requests.filter(function(x){ return x !== q && x.department === q.department && x.region === q.region && x.date === iso && (x.status === 'approved' || x.status === 'awaiting'); }).length >= allocIn(DB, q.department, q.region, iso)) return {error:'That date has no open slot.'};
-        var dl = mgrDeadline(new Date(q.submitted_at).getTime(), iso, DB.settings.min_notice_days, Date.now(), DB.settings); if (!dl) return {error:'That date is too close to the notice cutoff for a manager review. Cancel this request and submit a new one.'};
-        q.date = iso; q.mgr_deadline = new Date(dl).toISOString();
+        var dl = mgrDeadline(new Date(q.submitted_at).getTime(), iso, DB.settings.min_notice_days, Date.now(), DB.settings); 
+        q.date = iso; q.mgr_deadline = dl ? new Date(dl).toISOString() : '';
       }
       q.note = note; return {ok:true}; },
     setManagerPasscode: function(p){ if (String(p.passcode || '').length < 8) return {error:'Use 8 characters or more for the passcode.'}; DB.mgrPass[p.name] = String(p.passcode); return {ok:true}; },
     saveOvrSettings: function(p){ DB.settings.ovr_reject_hours = clampInt(p.ovr_reject_hours == null ? 24 : p.ovr_reject_hours, 1, 336); return {ok:true}; },
-    saveSettings: function(p){ DB.settings.approval_mode = p.approval_mode === 'manual' ? 'manual' : 'auto'; DB.settings.min_notice_days = clampInt(p.min_notice_days, 0, 365); DB.settings.mgr_max_hours = clampInt(p.mgr_max_hours == null ? 72 : p.mgr_max_hours, 1, 168); if (TZ_LIST.some(function(x){ return x[0] === p.timezone; })){ DB.settings.timezone = p.timezone; DB.today = todayIn(p.timezone); } return {ok:true}; },
+    saveSettings: function(p){ DB.settings.approval_mode = p.approval_mode === 'manual' ? 'manual' : 'auto'; DB.settings.min_notice_days = clampInt(p.min_notice_days, 0, 365); DB.settings.mgr_max_hours = clampInt(p.mgr_max_hours == null ? 72 : p.mgr_max_hours, 1, 168);
+      var wasOff = !!DB.settings.mgr_window_off, nowOff = !!p.mgr_window_off; DB.settings.mgr_window_off = nowOff;
+      if (nowOff && !wasOff) DB.requests.forEach(function(q){ if (q.status === 'awaiting') q.mgr_deadline = ''; });
+      if (!nowOff && wasOff) DB.requests.forEach(function(q){ if (q.status === 'awaiting' && !q.mgr_deadline){ q.mgr_deadline = new Date(Date.now() + DB.settings.mgr_max_hours * 36e5).toISOString(); q.mgr_reminded = false; } }); if (TZ_LIST.some(function(x){ return x[0] === p.timezone; })){ DB.settings.timezone = p.timezone; DB.today = todayIn(p.timezone); } return {ok:true}; },
     setDefault: function(p){ var k = p.department + '|' + p.region, d = DB.settings.defaults[k] || (DB.settings.defaults[k] = {}); if (p.slots == null) delete d[p.month]; else d[p.month] = clampInt(p.slots, 0, 999); return {ok:true}; },
-    setRequired: function(p){ var rq = DB.settings.required || (DB.settings.required = {});
-      (p.regions || []).forEach(function(R){ var k = p.department + '|' + R, d = rq[k] || (rq[k] = {});
-        if (p.headcount == null){ if (p.month === '*') delete rq[k]; else delete d[p.month]; return; }
-        d[p.month] = clampInt(p.headcount, 0, 9999); if (p.month === '*' && p.clear_all) Object.keys(d).forEach(function(x){ if (x !== '*') delete d[x]; }); });
+    setRequired: function(p){ var pct = p.mode === 'pct', mine = pct ? (DB.settings.required_pct || (DB.settings.required_pct = {})) : (DB.settings.required || (DB.settings.required = {})), other = pct ? (DB.settings.required || (DB.settings.required = {})) : (DB.settings.required_pct || (DB.settings.required_pct = {}));
+      (p.regions || []).forEach(function(R){ var k = p.department + '|' + R, d = mine[k] || (mine[k] = {});
+        if (p.headcount == null){ [DB.settings.required, DB.settings.required_pct].forEach(function(t){ if (!t) return; if (p.month === '*') delete t[k]; else if (t[k]) delete t[k][p.month]; }); return; }
+        d[p.month] = clampInt(p.headcount, 0, pct ? 100 : 9999); if (p.month === '*' && p.clear_all) Object.keys(d).forEach(function(x){ if (x !== '*') delete d[x]; });
+        if (other[k]){ if (p.month === '*' && p.clear_all) delete other[k]; else delete other[k][p.month]; } });
       return {ok:true}; },
-    setDefaults: function(p){ var rq = DB.settings.required || {}; (p.regions || []).forEach(function(R){ var k = p.department + '|' + R, d = DB.settings.defaults[k] || (DB.settings.defaults[k] = {});
-      if (rq[k]){ if (p.month === '*') delete rq[k]; else delete rq[k][p.month]; } d[p.month] = clampInt(p.slots, 0, 999); if (p.month === '*' && p.clear_all) Object.keys(d).forEach(function(x){ if (x !== '*') delete d[x]; }); }); return {ok:true}; },
+    setDefaults: function(p){ var rq = DB.settings.required || {}, rp2 = DB.settings.required_pct || {}; (p.regions || []).forEach(function(R){ var k = p.department + '|' + R, d = DB.settings.defaults[k] || (DB.settings.defaults[k] = {});
+      [rq, rp2].forEach(function(t){ if (t[k]){ if (p.month === '*') delete t[k]; else delete t[k][p.month]; } }); d[p.month] = clampInt(p.slots, 0, 999); if (p.month === '*' && p.clear_all) Object.keys(d).forEach(function(x){ if (x !== '*') delete d[x]; }); }); return {ok:true}; },
     changePassword: function(p){ if (p.current !== pass && p.current !== 'dev') return {error:'The current passcode is not right.'}; if (String(p.next || '').length < 8) return {error:'Use 8 characters or more for the new passcode.'}; pass = String(p.next); return {ok:true}; },
     setOverride: function(p){ var k = akey(p.department, p.region, p.date); if (p.slots == null) delete DB.overrides[k]; else DB.overrides[k] = clampInt(p.slots, 0, 999); return {ok:true}; },
     clearOverrides: function(p){ var pre = akey(p.department, p.region, p.month); Object.keys(DB.overrides).forEach(function(k){ if (k.indexOf(pre) === 0) delete DB.overrides[k]; }); return {ok:true}; },
@@ -1402,7 +1450,7 @@ function seed(){
     ['Tyler Brooks',TS,'AMS'],['Gabriela Mendes',TS,'AMS'],['Samuel Ortiz',TS,'AMS'],['Rina Hoshino',BL,'APAC'],['Carlo Bautista',BL,'APAC'],['Elise Laurent',BL,'EMEA'],['Noah Patel',BL,'AMS']];
   var roster = people.map(function(p, i){ return {name:p[0], employee_id:String(104011 + i * 37), manager:mgr[p[1] + '|' + p[2]], region:p[2], department:p[1], work_days:['Mon,Tue,Wed,Thu,Fri','Mon,Tue,Wed,Thu,Fri','Mon,Tue,Wed,Thu,Fri','Tue,Wed,Thu,Fri,Sat','Sun,Mon,Tue,Wed,Thu'][i % 5], shift:{APAC:['06:00-15:00','09:00-18:00'], EMEA:['14:00-23:00','16:00-01:00'], AMS:['21:00-06:00','23:00-08:00']}[p[2]][i % 2]}; });
   var defaults = {}; Object.keys(mgr).forEach(function(k){ defaults[k] = {'*': k.indexOf(CS) === 0 ? 2 : 1}; });
-  var DB = {today:today, isAdmin:false, settings:{approval_mode:'auto', min_notice_days:14, mgr_max_hours:72, ovr_reject_hours:24, timezone:MNL, defaults:defaults, required:{}}, overrides:{}, roster:roster, requests:[]};
+  var DB = {today:today, isAdmin:false, settings:{approval_mode:'auto', min_notice_days:14, mgr_max_hours:72, ovr_reject_hours:24, timezone:MNL, defaults:defaults, required:{}, required_pct:{}, mgr_window_off:false}, overrides:{}, roster:roster, requests:[]};
   DB.overrides[akey(CS, 'APAC', addDays(today, 22))] = 0;
   DB.overrides[akey(CS, 'APAC', addDays(today, 29))] = 4;
   DB.overrides[akey(TS, 'AMS', addDays(today, 18))] = 3;
@@ -1530,6 +1578,7 @@ function viewLanding(){
 }
 function keyRule(){
   var t = S.settings, mx = t.mgr_max_hours || 72;
+  if (winOff()) return '<div class="keyrule" role="note"><div class="kr"><b>No time limit</b><span>manager approval window</span></div><p>Every request goes to the agent manager first. There is no deadline, so a request waits for the manager and its slot stays held until the manager answers. WFM can set a time limit again in Settings, next to the minimum notice.</p></div>';
   return '<div class="keyrule" role="note"><div class="kr"><b>' + mx + ' hours</b><span>manager approval window</span></div>' +
     '<p>Every request goes to the agent manager first, who has ' + mx + ' hours from the moment it is sent to answer. No answer in time means the request is rejected and the slot goes back to the team. WFM can change this window in Settings, next to the minimum notice.</p></div>';
 }
@@ -1538,7 +1587,7 @@ function roleGuide(r){
   if (r === 'manager') return {lead:'Approve or reject your team time off requests before the deadline.', steps:[
     ['Sign in', 'Pick your profile from the circles and enter the passcode WFM gave you. You stay signed in on this device until you press Sign out. Guide is always the first tab.'],
     ['Open Approvals', 'Four tiles sum it up: Waiting, Next reply due, Approved ahead and Off this week. Requests are listed most urgent first. The countdown bar turns amber, then red, as the window runs out.'],
-    ['Answer in time', 'You have ' + mx + ' hours from when the request is sent. Each card shows the time left and the reply-by time. The agent is reminded a day before the deadline, and unanswered requests are rejected and the slot goes back to the team.'],
+    [winOff() ? 'Answer when you can' : 'Answer in time', winOff() ? 'There is no deadline right now. Each card shows how long the request has been waiting, and the agent\'s slot stays held until you answer. Answer early so the agent can plan.' : 'You have ' + mx + ' hours from when the request is sent. Each card shows the time left and the reply-by time. The agent is reminded a day before the deadline, and unanswered requests are rejected and the slot goes back to the team.'],
     ['Approve or reject', 'Approve one request, or tick several and approve or reject them together. After you approve, the notice and allocation rules give the final answer.'],
     ['Upcoming time off', 'Your team\'s approved days off are listed below the queue. Only the agent who asked can cancel a request.'],
     ['See the whole picture', 'PTO Dashboard opens on your team. Switch to All requests to see everyone. It shows who is off each day and lets you filter by month, department, region and status, and Extract report saves the same view as a formatted Excel file.']]};
@@ -1553,15 +1602,15 @@ function roleGuide(r){
   if (r === 'wfm') return {lead:'Set up the roster and allocation, and keep an eye on requests and coverage.', steps:[
     ['Sign in', 'Use the WFM passcode. Developers use their developer key in the same place. You stay signed in on this device until you press Sign out. Your tabs are Guide, PTO Dashboard and Settings.'],
     ['Load the roster', 'In Settings, download the template, fill it in and upload it. Departments, regions, managers and shifts come from it. Shift times are entered in Manila time (currently shown in ' + esc(tz) + ').'],
-    ['Set allocation', 'Open a department in PTO allocation. Set the required headcount per region and the app works out the PTO slots, or set slots by hand for any day.'],
+    ['Set allocation', 'Open a department in PTO allocation. Set the required headcount, or the percent of headcount needed on duty, per region and the app works out the PTO slots (agents scheduled minus agents needed, percent rounded up), or set slots by hand for any day.'],
     ['Give managers access', 'In Settings, Manager sign-in, set a passcode for each manager so they can answer their team requests. Managers come from the Current Manager column of the roster.'],
     ['Review a request', 'Managers answer their own team requests and override requests go to the Admin. Select a row in the All requests table on the PTO Dashboard to see its full details: status, manager, reason and timeline. Requests cannot be edited or deleted there. The Pending tab appears only when Manual review is on.'],
     ['Watch coverage and report', 'PTO Dashboard starts with headcount after PTO, then request counts and who is off each day, then the daily headcount chart, requests by status, PTO by team, overrides and the lowest-coverage days. The table lists every request with where it stands, including waiting for manager approval and waiting for override approval. Extract report saves the same as a formatted Excel file.'],
-    ['Set the approval window', 'In Settings, next to the minimum notice, set how long managers have to answer, one window for every request (now ' + mx + ' hours).']]};
+    ['Set the approval window', 'In Settings, next to the minimum notice, set how long managers have to answer, one window for every request (' + (winOff() ? 'now off, so there is no time limit' : 'now ' + mx + ' hours') + '). Choose No time limit if requests should wait for the manager without expiring.']]};
   return {lead:'Request time off in a few clicks and follow it until it is approved.', steps:[
     ['Find yourself', 'Type your name in the search bar and pick it. Greenlight remembers you on this device until you press Sign out. Guide is always the first tab if you need these steps again.'],
     ['Pick your dates', 'On your PTO Dashboard, tap the Submit PTO request circle to open your calendar. Green days have a slot, striped days with an amber dot are inside the ' + nt + ' notice, and full days have no slot left. Tap one or more days, in any month.'],
-    ['Submit', 'A pop-up shows the journey of your request: Submitted, Manager approval, Automated WFM review. Your manager has ' + mx + ' hours, and your slot is held for you while you wait.'],
+    ['Submit', 'A pop-up shows the journey of your request: Submitted, Manager approval, Automated WFM review. ' + (winOff() ? 'Your manager has no deadline, and your slot is held for you until they answer.' : 'Your manager has ' + mx + ' hours, and your slot is held for you while you wait.')],
     ['Track it', 'Your PTO request history lists every request, coming up first. Tap one to see its timeline and where it stands right now.'],
     ['Change your mind', 'From that timeline you can edit the date or add a note until your manager answers, or cancel a waiting or approved request before the date with a short reason. Only you can cancel your own request.'],
     ['Short notice or full day?', 'Those dates need an override request. Give a reason for each one, and the button becomes Submit request and override request, so your other dates go in as normal requests at the same time. Only the override dates go to the Admin, and the bell tells you when they are decided.'],
@@ -1602,7 +1651,7 @@ function tlHtml(steps){ return '<ol class="tl">' + steps.map(function(x, i){ ret
 function reqSteps(q){
   var mgr = q.manager || 'your manager', ms = q.mgr_status, early = q.status === 'cancelled' && q.cancelled_from === 'awaiting', st = [];
   st.push({c:'done', t:'Submitted', d:fmtStamp(q.submitted_at)});
-  if (q.status === 'awaiting') st.push({c:'now', t:'Manager approval', d:'Waiting for ' + mgr + '. Reply due by ' + fmtStamp(q.mgr_deadline) + '. With no answer by then the request is rejected and the slot goes back to the team.'});
+  if (q.status === 'awaiting') st.push({c:'now', t:'Manager approval', d:'Waiting for ' + mgr + '. ' + (q.mgr_deadline ? 'Reply due by ' + fmtStamp(q.mgr_deadline) + '. With no answer by then the request is rejected and the slot goes back to the team.' : 'There is no deadline. Your slot is held until the manager answers.')});
   else if (ms === 'approved') st.push({c:'done', t:'Manager approval', d:'Approved by ' + (q.mgr_by || mgr) + '.'});
   else if (ms === 'rejected') st.push({c:'bad', t:'Manager approval', d:'Rejected by ' + (q.mgr_by || mgr) + '. ' + q.reason});
   else if (ms === 'expired') st.push({c:'bad', t:'Manager approval', d:'No answer before the deadline, so the request was rejected automatically.'});
@@ -1725,10 +1774,10 @@ function calModal(){
     var rq = m ? reqs.get(iso) : null;
     return '<button class="' + cls + (rq ? ' has' : '') + '" data-act="' + (rq ? 'openMine' : 'pick') + '" data-d="' + iso + '"' + (rq ? ' data-id="' + esc(rq.id) + '"' : (past ? ' disabled aria-pressed="false"' : ' aria-pressed="' + sel + '"')) + ' aria-label="' + fmtDate(iso) + ', ' + (m ? 'request ' + m + ', tap to see its timeline' : lab || 'past') + '"><span class="n">' + d + '</span><span class="l">' + lab + '</span></button>';
   });
-  var fact = function(k, v){ return '<div><span>' + k + '</span><b>' + esc(v) + '</b></div>'; };
+  var fact = function(k, v){ return '<div title="' + esc(k + ': ' + v) + '"><span>' + k + '</span><b>' + esc(v) + '</b></div>'; };
   return shell(esc(a.name), 'Time off request',
     '<div class="facts">' + fact('Manager', a.manager) + fact('Department', a.department) + fact('Region', a.region) + fact('Schedule', fmtDays(a) + (a.shift ? ' · ' + shiftIn(a.shift) + ' ' + tzName(curTZ()) : '')) + fact('Rest days', fmtRest(a)) + '</div>' +
-    '<p class="small muted">Your manager has ' + (st.mgr_max_hours || 72) + ' hours to answer, and your slot is held meanwhile. Striped days are inside the ' + noticeText(st.min_notice_days) + ' notice window' + (manual ? ' and are flagged as short notice.' : '. They and full days need an override request with a reason.') + ' Tap a requested day to follow it.</p>' +
+    '<p class="small muted">' + (st.mgr_window_off ? 'Your manager answers with no deadline, and your slot is held meanwhile.' : 'Your manager has ' + (st.mgr_max_hours || 72) + ' hours to answer, and your slot is held meanwhile.') + ' Striped days are inside the ' + noticeText(st.min_notice_days) + ' notice window' + (manual ? ' and are flagged as short notice.' : '. They and full days need an override request with a reason.') + ' Tap a requested day to follow it.</p>' +
     '<div class="bar">' + monthNav('reqMonth') + '</div>' + grid +
     '<div class="legend"><span><i style="background:var(--accent-soft)"></i>Open slots</span><span><i style="background:var(--surface-2)"></i>Full or no slots</span><span><i class="day soon lg" style="min-height:0;padding:0"></i>Inside ' + noticeText(st.min_notice_days) + ' notice</span><span><i style="background:var(--pick-bg);border-color:var(--pick-bg)"></i>Your selection</span><span><i style="background:var(--ok-bg);border-color:var(--ok-bg)"></i>Approved</span><span><i style="background:var(--warn-soft);border-color:var(--warn)"></i>Waiting</span><span><i style="background:var(--danger-soft);border-color:var(--danger)"></i>Rejected</span></div>' + pickBlock(a), 'mid',
     '<span class="ava" aria-hidden="true">' + esc(initials(a.name)) + '</span>');
@@ -1750,7 +1799,7 @@ function viewDashboard(){
   var sc = dashScope(), n = daysIn(sc.ym), per = {}, tot = {approved:0, pending:0, rejected:0, awaiting:0, cancelled:0}, caps = {}, peak = null, i, iso, wfm = S.isAdmin;
   sc.rq.forEach(function(q){ tot[q.status]++; if (q.status === 'approved') per[q.date] = (per[q.date] || 0) + 1; });
   for (i = 1; i <= n; i++){ iso = sc.ym + '-' + pad(i); caps[iso] = sc.cap(iso); if (per[iso] && (!peak || per[iso] > per[peak])) peak = iso; }
-  var tiles = '<div class="tiles' + (wfm ? ' three' : '') + '"><div class="tile ok"><div class="k">Approved</div><div class="v tn">' + tot.approved + '</div><div class="s">days off approved</div></div>' +
+  var tiles = '<div class="tiles' + (wfm ? ' row" style="--n:5' : '') + '">' + (wfm ? reportBlocks(rpData(sc.ym, UI.dashDept, UI.dashRegion)).items : '') + '<div class="tile ok"><div class="k">Approved</div><div class="v tn">' + tot.approved + '</div><div class="s">days off approved</div></div>' +
     '<div class="tile no"><div class="k">Rejected</div><div class="v tn">' + tot.rejected + '</div><div class="s">days off turned down</div></div>' +
     '<div class="tile wait"><div class="k">Pending</div><div class="v tn">' + tot.pending + '</div><div class="s">waiting for an admin</div></div>' +
     (wfm ? '' : '<div class="tile"><div class="k">Busiest day</div><div class="v tn">' + (peak ? fmtShort(peak) : 'None') + '</div><div class="s">' + (peak ? per[peak] + (per[peak] === 1 ? ' person off' : ' people off') : 'no one is off yet') + '</div></div>') + '</div>';
@@ -1787,7 +1836,7 @@ function viewDashboard(){
       : '<p class="empty">No ' + (wfm ? '' : 'approved or rejected ') + 'requests match these filters.</p>') + '</div>';
   var hc = wfm ? reportBlocks(rpData(sc.ym, UI.dashDept, UI.dashRegion)) : null;
   return '<div class="head dash"><div><h2>Dashboard</h2><p>Time off in ' + fmtMonth(sc.ym) + ' for ' + (sc.mine ? esc(S.managerName) + ' team, ' : S.isManager ? 'all teams, ' : '') + esc(UI.dashDept || 'all departments') + ', ' + esc(UI.dashRegion || 'all regions') + '.</p></div>' +
-    '<div class="bar">' + (S.isManager ? '<div class="seg" role="tablist" aria-label="Whose requests"><button class="' + (sc.mine ? 'on' : '') + '" data-act="dashTeam" data-v="mine">My team</button><button class="' + (sc.mine ? '' : 'on') + '" data-act="dashTeam" data-v="all">All requests</button></div>' : '') + monthNav('dashMonth') + '<select class="input" id="dashDept" data-ch="ui" data-k="dashDept" style="width:auto" aria-label="Department">' + options(depts(), UI.dashDept, 'All departments') + '</select><select class="input" id="dashRegion" data-ch="ui" data-k="dashRegion" style="width:auto" aria-label="Region">' + options(regions(), UI.dashRegion, 'All regions') + '</select><button class="btn primary" data-act="report">Extract report</button></div></div>' + (hc ? hc.tiles : '') + tiles +
+    '<div class="bar">' + (S.isManager ? '<div class="seg" role="tablist" aria-label="Whose requests"><button class="' + (sc.mine ? 'on' : '') + '" data-act="dashTeam" data-v="mine">My team</button><button class="' + (sc.mine ? '' : 'on') + '" data-act="dashTeam" data-v="all">All requests</button></div>' : '') + monthNav('dashMonth') + '<select class="input" id="dashDept" data-ch="ui" data-k="dashDept" style="width:auto" aria-label="Department">' + options(depts(), UI.dashDept, 'All departments') + '</select><select class="input" id="dashRegion" data-ch="ui" data-k="dashRegion" style="width:auto" aria-label="Region">' + options(regions(), UI.dashRegion, 'All regions') + '</select><button class="btn primary" data-act="report">Extract report</button></div></div>' + tiles +
     '<div class="panel"><div><h2>People off each day</h2><p class="small muted">The big number is how many people have approved time off that day. Tap a day to see the names.</p></div>' + grid +
     '<div class="legend"><span class="scale"><i style="--h:.15"></i><i style="--h:.45"></i><i style="--h:.75"></i><i style="--h:1"></i></span><span>Lighter to darker: more of the day\'s PTO slots are taken</span><span><i style="box-shadow:inset 0 0 0 2px var(--danger);border:0"></i>More people off than slots</span></div></div>' +
     (hc ? hc.rest : '') + results;
@@ -1828,14 +1877,15 @@ function viewManage(){
 function dTile(iso, st){ var d = parse(iso); return '<span class="hdate st-' + st + '" aria-hidden="true"><i>' + MONTHS[d.getUTCMonth()].slice(0, 3) + '</i><b class="tn">' + d.getUTCDate() + '</b><em>' + DOW[d.getUTCDay()] + '</em></span>'; }
 function mgrRow(q){
   var al = allocOf(q.department, q.region, q.date), us = usedOf(q.department, q.region, q.date), on = UI.ap.sel.indexOf(q.id) >= 0;
-  var end = new Date(q.mgr_deadline).getTime(), start = new Date(q.submitted_at).getTime(), left = end - Date.now(), hrs = left / 36e5;
-  var frac = Math.max(0, Math.min(1, left / Math.max(1, end - start)));
-  var due = left <= 0 ? 'Due now' : hrs < 1 ? 'Under 1 hour left' : hrs < 48 ? Math.floor(hrs) + ' hours left' : Math.floor(hrs / 24) + ' days left';
+  var nodl = !q.mgr_deadline, end = nodl ? 0 : new Date(q.mgr_deadline).getTime(), start = new Date(q.submitted_at).getTime(), left = end - Date.now(), hrs = left / 36e5;
+  var frac = nodl ? 1 : Math.max(0, Math.min(1, left / Math.max(1, end - start)));
+  var wait = (Date.now() - start) / 36e5, ageTxt = wait < 1 ? 'Under 1 hour' : wait < 48 ? Math.floor(wait) + ' hours' : Math.floor(wait / 24) + ' days';
+  var due = nodl ? 'No deadline' : left <= 0 ? 'Due now' : hrs < 1 ? 'Under 1 hour left' : hrs < 48 ? Math.floor(hrs) + ' hours left' : Math.floor(hrs / 24) + ' days left';
   var lvl = frac < 1 / 3 ? 'hot' : frac < 2 / 3 ? 'warm' : 'calm';
   return '<div class="apcard ' + lvl + (on ? ' on' : '') + '"><label class="ck"><input type="checkbox" data-ch="apPick" data-id="' + esc(q.id) + '"' + (on ? ' checked' : '') + ' aria-label="Select ' + esc(q.name) + ', ' + fmtDate(q.date) + '"></label>' + dTile(q.date, 'awaiting') +
     '<div class="apbody"><button class="rname apwho" data-act="openReq" data-id="' + esc(q.id) + '"><span class="ava" aria-hidden="true">' + esc(initials(q.name)) + '</span><span><b>' + esc(q.name) + '</b><span>' + esc(q.department) + ' · ' + esc(q.region) + '</span></span></button>' +
     '<div class="apmeta"><span class="meter" title="' + us + ' of ' + al + ' slots held or used"><i style="width:' + (al ? Math.min(100, us / al * 100) : 100).toFixed(0) + '%"></i></span><span class="small muted tn">' + us + '/' + al + ' slots · sent ' + fmtStamp(q.submitted_at) + '</span></div>' +
-    '<div class="clock"><span class="cbar"><i style="width:' + (frac * 100).toFixed(0) + '%"></i></span><span class="small"><b>' + due + '</b> · reply by ' + fmtStamp(q.mgr_deadline) + '</span></div>' + (q.note ? '<p class="apnote">“' + esc(q.note) + '”</p>' : '') + '</div>' +
+    '<div class="clock"><span class="cbar"><i style="width:' + (frac * 100).toFixed(0) + '%"></i></span><span class="small"><b>' + due + '</b> · ' + (nodl ? 'waiting ' + ageTxt : 'reply by ' + fmtStamp(q.mgr_deadline)) + '</span></div>' + (q.note ? '<p class="apnote">“' + esc(q.note) + '”</p>' : '') + '</div>' +
     '<div class="ovacts"><button class="btn sm" data-act="mgrReject" data-id="' + esc(q.id) + '">Reject</button><button class="btn sm primary" data-act="mgrApprove" data-id="' + esc(q.id) + '">Approve</button></div></div>';
 }
 function mgrToast(r){
@@ -1845,12 +1895,12 @@ function mgrToast(r){
 }
 function viewApprovals(){
   var ap = UI.ap, mine = function(q){ return q.manager === S.managerName; };
-  var list = awaitingMine().sort(function(a, b){ return a.mgr_deadline < b.mgr_deadline ? -1 : a.mgr_deadline > b.mgr_deadline ? 1 : byDate(a, b); });
+  var list = awaitingMine().sort(function(a, b){ var x = a.mgr_deadline || a.submitted_at, y = b.mgr_deadline || b.submitted_at; return x < y ? -1 : x > y ? 1 : byDate(a, b); });
   var ids = list.map(function(q){ return q.id; }); ap.sel = ap.sel.filter(function(id){ return ids.indexOf(id) >= 0; });
   var allOn = list.length && ap.sel.length === list.length;
   var up = S.requests.filter(function(q){ return q.status === 'approved' && q.date >= S.today && mine(q); }).sort(byDate).slice(0, 60);
-  var nx = list[0], nxLeft = nx ? new Date(nx.mgr_deadline).getTime() - Date.now() : 0, nxH = nxLeft / 36e5;
-  var nxTxt = !nx ? 'None' : nxLeft <= 0 ? 'Now' : nxH < 1 ? '<1h' : nxH < 48 ? Math.floor(nxH) + 'h' : Math.floor(nxH / 24) + 'd ' + Math.floor(nxH % 24) + 'h';
+  var nx = list[0], nxNo = nx && !nx.mgr_deadline, nxLeft = nx ? (nxNo ? Date.now() - new Date(nx.submitted_at).getTime() : new Date(nx.mgr_deadline).getTime() - Date.now()) : 0, nxH = nxLeft / 36e5;
+  var nxTxt = !nx ? 'None' : !nxNo && nxLeft <= 0 ? 'Now' : nxH < 1 ? '<1h' : nxH < 48 ? Math.floor(nxH) + 'h' : Math.floor(nxH / 24) + 'd ' + Math.floor(nxH % 24) + 'h';
   var wkEnd = addDays(S.today, 6), wk = up.filter(function(q){ return q.date <= wkEnd; });
   var team = S.roster.filter(mine).length;
   var stat = function(cls, k, v, sub){ return '<div class="tile ' + cls + '"><div class="k">' + k + '</div><div class="v tn">' + v + '</div><div class="s">' + sub + '</div></div>'; };
@@ -1859,7 +1909,7 @@ function viewApprovals(){
   var upTile = function(q){ var n = diffDays(q.date, S.today);
     return '<div class="uptile">' + dTile(q.date, 'approved') + '<button class="rname grow" data-act="openReq" data-id="' + esc(q.id) + '"><b>' + esc(q.name) + '</b><span>' + esc(q.department) + ' · ' + esc(q.region) + '</span><span class="soon">' + (n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : 'In ' + n + ' days') + '</span></button></div>'; };
   return '<div class="head"><div><h1>Approvals</h1><p>Requests from ' + esc(S.managerName) + ' team, most urgent first. Their slots are held until you answer. If you do not answer in time, the request is rejected and the slot goes back.</p></div></div>' +
-    '<div class="tiles">' + stat('wait', 'Waiting', list.length, 'need your answer') + stat('no', 'Next reply due', nxTxt, nx ? esc(nx.name.split(' ')[0]) + ', ' + fmtShort(nx.date) + ' · of ' + (S.settings.mgr_max_hours || 72) + 'h window' : 'nothing waiting') + stat('ok', 'Approved ahead', up.length, 'upcoming days off') + stat('', 'Off this week', wk.length, 'of ' + team + ' on your team') + '</div>' +
+    '<div class="tiles">' + stat('wait', 'Waiting', list.length, 'need your answer') + stat('no', nxNo ? 'Waiting longest' : 'Next reply due', nxTxt, nx ? esc(nx.name.split(' ')[0]) + ', ' + fmtShort(nx.date) + (nxNo ? ' · no deadline' : ' · of ' + (S.settings.mgr_max_hours || 72) + 'h window') : 'nothing waiting') + stat('ok', 'Approved ahead', up.length, 'upcoming days off') + stat('', 'Off this week', wk.length, 'of ' + team + ' on your team') + '</div>' +
     '<div class="panel apcol"><div class="bar"><h2>Waiting for approval <span class="badge">' + list.length + '</span></h2></div>' +
     (list.length ? '<div class="ovbar"><label class="ck"><input type="checkbox" data-ch="apAll"' + (allOn ? ' checked' : '') + '> <span>' + (ap.sel.length ? ap.sel.length + ' selected' : 'Select all') + '</span></label><span class="grow"></span><button class="btn sm" data-act="apBulk" data-v="reject"' + (ap.sel.length ? '' : ' disabled') + '>Reject selected</button><button class="btn sm primary" data-act="apBulk" data-v="approve"' + (ap.sel.length ? '' : ' disabled') + '>Approve selected</button></div><div class="aprows">' + list.map(mgrRow).join('') + '</div>' : '<div class="hempty"><span aria-hidden="true">✓</span><p>All caught up. Nothing is waiting for approval.</p></div>') + '</div>' +
     '<div class="panel"><div><h2>Upcoming approved time off <span class="badge okb">' + up.length + '</span></h2><p class="small muted">Approved days off for your team. Only the agent who asked can cancel a request.</p></div>' +
@@ -1874,16 +1924,16 @@ function rpData(ym, D, R){
   var inScope = function(q){ return (!D || q.department === D) && (!R || q.region === R); };
   var rq = S.requests.filter(function(q){ return q.date.slice(0, 7) === ym && inScope(q); });
   for (i = 1; i <= n; i++){ var iso = ym + '-' + pad(i), sch = 0, req = null, slots = 0;
-    combos.forEach(function(p){ sch += schedOn(S, p[0], p[1], iso); var r = requiredOf(S, p[0], p[1], ym); if (r != null) req = (req || 0) + r; slots += allocOf(p[0], p[1], iso); });
+    combos.forEach(function(p){ sch += schedOn(S, p[0], p[1], iso); var r = needOf(S, p[0], p[1], iso); if (r != null) req = (req || 0) + r; slots += allocOf(p[0], p[1], iso); });
     var off = rq.filter(function(q){ return q.date === iso && q.status === 'approved'; }).length, hold = rq.filter(function(q){ return q.date === iso && (q.status === 'awaiting' || q.status === 'pending'); }).length;
     days.push({iso:iso, d:i, dow:DOW[parse(iso).getUTCDay()], sch:sch, off:off, hold:hold, after:sch - off, req:req, slots:slots}); }
   var teams = combos.map(function(p){ var t = {dept:p[0], region:p[1], agents:S.roster.filter(function(a){ return a.department === p[0] && a.region === p[1]; }).length, off:0, low:null, below:0, sum:0, wd:0};
-    days.forEach(function(x){ var s0 = schedOn(S, p[0], p[1], x.iso), o = rq.filter(function(q){ return q.date === x.iso && q.status === 'approved' && q.department === p[0] && q.region === p[1]; }).length, r = requiredOf(S, p[0], p[1], ym), a = s0 - o;
+    days.forEach(function(x){ var s0 = schedOn(S, p[0], p[1], x.iso), o = rq.filter(function(q){ return q.date === x.iso && q.status === 'approved' && q.department === p[0] && q.region === p[1]; }).length, r = needOf(S, p[0], p[1], x.iso), a = s0 - o;
       t.off += o; if (s0){ t.sum += a; t.wd++; if (!t.low || a < t.low.v) t.low = {v:a, iso:x.iso}; if (r != null && a < r) t.below++; } });
     t.avg = t.wd ? t.sum / t.wd : 0; return t; });
   var st = {approved:0, waiting:0, rejected:0, cancelled:0}; rq.forEach(function(q){ st[q.status === 'awaiting' || q.status === 'pending' ? 'waiting' : q.status]++; });
   var ov = {notice:{approved:0, declined:0, open:0, expired:0}, allocation:{approved:0, declined:0, open:0, expired:0}}; rq.forEach(function(q){ if (q.override_status) ov[ovType(q)][q.override_status] = (ov[ovType(q)][q.override_status] || 0) + 1; });
-  return {ym:ym, days:days, teams:teams, st:st, ov:ov, rq:rq};
+  return {ym:ym, days:days, teams:teams, st:st, ov:ov, rq:rq, D:D || '', R:R || ''};
 }
 function ticks(max){ var step = max <= 5 ? 1 : max <= 12 ? 2 : max <= 30 ? 5 : max <= 60 ? 10 : Math.ceil(max / 50) * 10, out = []; for (var v = 0; v <= max; v += step) out.push(v); if (out[out.length - 1] < max) out.push(out[out.length - 1] + step); return out; }
 function hcChart(days){
@@ -1895,7 +1945,7 @@ function hcChart(days){
     if (x.sch) g += '<rect class="b-sch" x="' + cx + '" y="' + y(x.sch) + '" width="' + w + '" height="' + (y(0) - y(x.sch)) + '" rx="3"/>';
     if (x.after > 0) g += '<rect class="b-after' + (x.req != null && x.after < x.req ? ' low' : '') + '" x="' + (cx + w * .18) + '" y="' + y(x.after) + '" width="' + (w * .64) + '" height="' + (y(0) - y(x.after)) + '" rx="3"/>';
     if (i % (bw < 18 ? 2 : 1) === 0 || i === days.length - 1) g += '<text class="ax' + (wk ? ' wk' : '') + '" x="' + (cx + w / 2) + '" y="' + (H - 8) + '" text-anchor="middle">' + x.d + '</text>';
-    g += '<rect class="hit" x="' + (L + i * bw) + '" y="' + T + '" width="' + bw + '" height="' + (H - T - B) + '" data-tip="' + esc('<b>' + fmtDate(x.iso) + '</b><br>Scheduled: ' + x.sch + '<br>On PTO: ' + x.off + (x.hold ? ' (+' + x.hold + ' waiting)' : '') + '<br>Headcount after PTO: <b>' + x.after + '</b>' + (x.req != null ? '<br>Required: ' + x.req : '')) + '"/>'; });
+    g += '<rect class="hit" data-act="chartDay" data-d="' + x.iso + '" x="' + (L + i * bw) + '" y="' + T + '" width="' + bw + '" height="' + (H - T - B) + '" data-tip="' + esc('<b>' + fmtDate(x.iso) + '</b><br>Scheduled: ' + x.sch + '<br>On PTO: ' + x.off + (x.hold ? ' (+' + x.hold + ' waiting)' : '') + '<br>Headcount after PTO: <b>' + x.after + '</b>' + (x.req != null ? '<br>Required: ' + x.req : '') + '<br><i>Click to see the data</i>') + '"/>'; });
   var rq = days.filter(function(x){ return x.req != null && x.sch; });
   if (rq.length){ var pts = days.map(function(x, i){ return x.req != null ? (L + i * bw + bw / 2) + ',' + y(x.req) : null; }).filter(Boolean).join(' '); g += '<polyline class="l-req" points="' + pts + '"/>'; }
   return '<div class="chartwrap"><svg viewBox="0 0 ' + W + ' ' + H + '" class="chart" role="img" aria-label="Daily headcount after PTO">' + g + '</svg></div>' +
@@ -1905,19 +1955,47 @@ function donut(st){
   var parts = [['approved', 'Approved', st.approved], ['waiting', 'Waiting', st.waiting], ['rejected', 'Not approved', st.rejected], ['cancelled', 'Cancelled', st.cancelled]], tot = parts.reduce(function(a, x){ return a + x[2]; }, 0);
   var R = 62, C = 2 * Math.PI * R, off = 0, segs = '';
   if (tot) parts.forEach(function(x){ if (!x[2]) return; var len = C * x[2] / tot, gap = parts.filter(function(p){ return p[2]; }).length > 1 ? 3 : 0;
-    segs += '<circle class="seg-' + x[0] + '" r="' + R + '" cx="80" cy="80" fill="none" stroke-width="20" stroke-dasharray="' + Math.max(0, len - gap) + ' ' + (C - Math.max(0, len - gap)) + '" stroke-dashoffset="' + (-off) + '" transform="rotate(-90 80 80)" data-tip="' + esc('<b>' + x[1] + '</b><br>' + x[2] + ' of ' + tot + ' (' + Math.round(x[2] / tot * 100) + '%)') + '"/>'; off += len; });
+    segs += '<circle class="seg-' + x[0] + '" r="' + R + '" cx="80" cy="80" fill="none" stroke-width="20" stroke-dasharray="' + Math.max(0, len - gap) + ' ' + (C - Math.max(0, len - gap)) + '" stroke-dashoffset="' + (-off) + '" transform="rotate(-90 80 80)" data-act="chartStatus" data-v="' + x[0] + '" data-tip="' + esc('<b>' + x[1] + '</b><br>' + x[2] + ' of ' + tot + ' (' + Math.round(x[2] / tot * 100) + '%)') + '"/>'; off += len; });
   return '<div class="donutbox"><svg viewBox="0 0 160 160" class="donut" role="img" aria-label="Requests by status"><circle r="' + R + '" cx="80" cy="80" fill="none" stroke-width="20" class="seg-bg"/>' + segs + '<text x="80" y="78" text-anchor="middle" class="dn-v">' + tot + '</text><text x="80" y="97" text-anchor="middle" class="dn-k">requests</text></svg>' +
-    '<ul class="dlegend">' + parts.map(function(x){ return '<li><i class="k-' + x[0] + '"></i><span>' + x[1] + '</span><b class="tn">' + x[2] + '</b></li>'; }).join('') + '</ul></div>';
+    '<ul class="dlegend">' + parts.map(function(x){ return '<li class="clk" data-act="chartStatus" data-v="' + x[0] + '" tabindex="0" role="button"><i class="k-' + x[0] + '"></i><span>' + x[1] + '</span><b class="tn">' + x[2] + '</b></li>'; }).join('') + '</ul></div>';
 }
 function teamBars(teams){
   var max = Math.max(1, Math.max.apply(null, teams.map(function(t){ return t.off; })));
-  return teams.length ? '<ul class="hbars">' + teams.slice().sort(function(a, b){ return b.off - a.off; }).map(function(t){ return '<li data-tip="' + esc('<b>' + t.dept + ' · ' + t.region + '</b><br>' + t.off + ' PTO days approved<br>' + t.agents + ' agents') + '"><span class="hl">' + esc(t.dept) + ' <em>' + esc(t.region) + '</em></span><span class="ht"><i style="width:' + (t.off / max * 100).toFixed(1) + '%"></i></span><b class="tn">' + t.off + '</b></li>'; }).join('') + '</ul>' : '<p class="empty">No teams in this filter.</p>';
+  return teams.length ? '<ul class="hbars">' + teams.slice().sort(function(a, b){ return b.off - a.off; }).map(function(t){ return '<li class="clk" data-act="chartTeam" data-dept="' + esc(t.dept) + '" data-region="' + esc(t.region) + '" tabindex="0" role="button" data-tip="' + esc('<b>' + t.dept + ' · ' + t.region + '</b><br>' + t.off + ' PTO days approved<br>' + t.agents + ' agents<br><i>Click to see the data</i>') + '"><span class="hl">' + esc(t.dept) + ' <em>' + esc(t.region) + '</em></span><span class="ht"><i style="width:' + (t.off / max * 100).toFixed(1) + '%"></i></span><b class="tn">' + t.off + '</b></li>'; }).join('') + '</ul>' : '<p class="empty">No teams in this filter.</p>';
 }
 function ovBars(ov){
   var row = function(k, label){ var o = ov[k], t = o.approved + o.declined + o.open;
-    var seg = function(c, v, n){ return v ? '<i class="' + c + '" style="flex:' + v + '" data-tip="' + esc('<b>' + label + '</b><br>' + n + ': ' + v) + '"></i>' : ''; };
-    return '<li><span class="hl">' + label + ' <em class="tn">' + t + '</em></span><span class="stack">' + (t ? seg('o-ok', o.approved, 'Approved') + seg('o-no', o.declined, 'Rejected') + seg('o-open', o.open, 'Open') : '<i class="o-none" style="flex:1"></i>') + '</span></li>'; };
+    var seg = function(c, v, n){ return v ? '<i class="' + c + '" data-act="chartOvr" data-t="' + k + '" data-s="' + (c === 'o-ok' ? 'approved' : c === 'o-no' ? 'declined' : 'open') + '" style="flex:' + v + '" data-tip=""' + esc('<b>' + label + '</b><br>' + n + ': ' + v + '<br><i>Click to see the requests</i>') + '"></i>' : ''; };
+    return '<li><span class="hl clk" data-act="chartOvr" data-t="' + k + '" data-s="" tabindex="0" role="button">' + label + ' <em class="tn">' + t + '</em></span><span class="stack">' + (t ? seg('o-ok', o.approved, 'Approved') + seg('o-no', o.declined, 'Rejected') + seg('o-open', o.open, 'Open') : '<i class="o-none" style="flex:1"></i>') + '</span></li>'; };
   return '<ul class="obars">' + row('notice', 'Short notice') + row('allocation', 'No allocation') + '</ul><div class="clegend"><span><i class="k-approved"></i>Approved</span><span><i class="k-rejected"></i>Rejected</span><span><i class="k-open"></i>Open</span></div>';
+}
+/* Pop-up behind every chart: the numbers and the requests that make up the bar, slice or row that was clicked. */
+function chartModal(m){
+  var r = UI.rpLast; if (!r) return shell('No data', '', '<p class="empty">Open the dashboard again.</p>', 'mid cmod');
+  var scope = fmtMonth(r.ym) + ' · ' + (r.D || 'All departments') + ' · ' + (r.R || 'All regions');
+  var rowsOf = function(list, withDate){ return list.length ? '<div class="box cdbox"><table class="cdt"><thead><tr><th>Agent</th>' + (withDate ? '<th>Date off</th>' : '') + '<th>Team</th><th>Status</th><th>Reason</th></tr></thead><tbody>' +
+    list.slice().sort(byDate).map(function(q){ return '<tr' + (S.isAdmin ? ' class="clk" data-act="openReq" data-id="' + esc(q.id) + '" tabindex="0"' : '') + '><td><b>' + esc(q.name) + '</b></td>' + (withDate ? '<td class="tn">' + fmtShort(q.date) + '</td>' : '') + '<td>' + esc(q.department) + ' · ' + esc(q.region) + '</td><td>' + statePill(q) + '</td><td class="muted">' + esc(q.decided_by === 'override' ? 'Override: ' + q.override_reason : q.override_request && q.override_status ? q.override_request : q.reason) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<p class="empty">No requests here.</p>'; };
+  var kv = function(pairs){ return '<div class="cdkv">' + pairs.map(function(x){ return '<div><span>' + x[0] + '</span><b class="tn">' + x[1] + '</b></div>'; }).join('') + '</div>'; };
+  if (m.kind === 'day'){
+    var x = r.days.find(function(d){ return d.iso === m.d; }) || {sch:0, off:0, hold:0, after:0, req:null};
+    var list = r.rq.filter(function(q){ return q.date === m.d && q.status !== 'cancelled'; });
+    return shell(fmtDate(m.d), 'Daily headcount after PTO · ' + scope, kv([['Scheduled', x.sch], ['On PTO', x.off], ['Waiting', x.hold], ['Headcount after PTO', x.after], ['Required', x.req != null ? x.req : '–'], ['Coverage', x.sch ? Math.round(x.after / x.sch * 100) + '%' : '–']]) +
+      '<h3 class="cdh">Requests for this day</h3>' + rowsOf(list, false), 'mid cmod');
+  }
+  if (m.kind === 'status'){
+    var lab = {approved:'Approved', waiting:'Waiting', rejected:'Not approved', cancelled:'Cancelled'}[m.v];
+    var l2 = r.rq.filter(function(q){ return (q.status === 'awaiting' || q.status === 'pending' ? 'waiting' : q.status) === m.v; });
+    return shell(lab + ' requests', 'Requests by status · ' + scope, kv([[lab, l2.length], ['Of all requests', r.rq.length ? Math.round(l2.length / r.rq.length * 100) + '%' : '–']]) + rowsOf(l2, true), 'mid cmod');
+  }
+  if (m.kind === 'team'){
+    var t = r.teams.find(function(z){ return z.dept === m.dept && z.region === m.region; }) || {agents:0, off:0, avg:0};
+    var l3 = r.rq.filter(function(q){ return q.department === m.dept && q.region === m.region && q.status === 'approved'; });
+    return shell(esc(m.dept) + ' · ' + esc(m.region), 'PTO days by team · ' + fmtMonth(r.ym), kv([['Agents', t.agents], ['PTO days approved', t.off], ['Avg headcount after PTO', Math.round(t.avg)], ['Lowest day', t.low ? t.low.v + ' on ' + fmtShort(t.low.iso) : '–']]) +
+      '<h3 class="cdh">Approved days off</h3>' + rowsOf(l3, true), 'mid cmod');
+  }
+  var tl = m.t === 'allocation' ? 'No allocation' : 'Short notice', sl = {approved:'Approved', declined:'Rejected', open:'Open'}[m.s] || 'All';
+  var l4 = r.rq.filter(function(q){ return q.override_status && ovType(q) === m.t && (!m.s || q.override_status === m.s); });
+  return shell('Override requests · ' + tl, sl + ' · ' + scope, kv([['Requests', l4.length], ['Approved', l4.filter(function(q){ return q.override_status === 'approved'; }).length], ['Rejected', l4.filter(function(q){ return q.override_status === 'declined'; }).length], ['Open', l4.filter(function(q){ return q.override_status === 'open'; }).length]]) + rowsOf(l4, true), 'mid cmod');
 }
 function reportBlocks(r){
   var work = r.days.filter(function(x){ return x.sch; }), low = null, below = 0, sum = 0, off = 0;
@@ -1925,9 +2003,11 @@ function reportBlocks(r){
   var avg = work.length ? sum / work.length : 0, schSum = work.reduce(function(a, x){ return a + x.sch; }, 0), cov = schSum ? (schSum - off) / schSum * 100 : 100;
   var tile = function(cls, k, v, sub){ return '<div class="tile ' + cls + '"><div class="k">' + k + '</div><div class="v tn">' + v + '</div><div class="s">' + sub + '</div></div>'; };
   var lowDays = work.slice().sort(function(a, b){ return a.after - b.after || (a.iso < b.iso ? -1 : 1); }).slice(0, 7);
-  return {tiles:'<div class="tiles">' + tile('ok', 'Avg headcount after PTO', avg.toFixed(1), 'agents on duty per working day') + tile('', 'Coverage kept', cov.toFixed(0) + '%', 'of scheduled agent-days') + tile('no', 'Lowest day', low ? low.after : '–', low ? fmtShort(low.iso) + ' · ' + low.off + ' on PTO' : 'no scheduled days') + tile('wait', 'Days below required', below, below ? 'need attention' : 'all days covered') + '</div>', rest:
-    '<div class="panel"><div class="bar"><div><h2>Daily headcount after PTO</h2><p class="small muted">' + fmtMonth(r.ym) + ' · hover a bar for the numbers</p></div></div>' + hcChart(r.days) + '</div>' +
-    '<div class="rpgrid"><div class="panel"><h2>Requests by status</h2>' + donut(r.st) + '</div><div class="panel"><h2>PTO days by team</h2>' + teamBars(r.teams) + '</div><div class="panel"><h2>Override requests</h2>' + ovBars(r.ov) + '</div></div>' +
+  UI.rpLast = r;
+  var items = tile('ok', 'Avg headcount after PTO', Math.round(avg), 'agents on duty per working day') + tile('', 'Coverage kept', cov.toFixed(0) + '%', 'of scheduled agent-days');
+  return {items:items, tiles:'<div class="tiles row" style="--n:2">' + items + '</div>', rest:
+    '<div class="panel"><div class="bar"><div><h2>Daily headcount after PTO</h2><p class="small muted">' + fmtMonth(r.ym) + ' · hover a bar for the numbers, click it to see the data</p></div></div>' + hcChart(r.days) + '</div>' +
+    '<div class="rpgrid"><div class="panel"><h2>Requests by status</h2><p class="small muted chint">Click a slice to see the requests</p>' + donut(r.st) + '</div><div class="panel"><h2>PTO days by team</h2><p class="small muted chint">Click a team to see its days off</p>' + teamBars(r.teams) + '</div><div class="panel"><h2>Override requests</h2><p class="small muted chint">Click a bar to see the requests</p>' + ovBars(r.ov) + '</div></div>' +
     lowTable(work)};
 }
 /* Coverage watchlist: every scheduled day, lowest coverage first. Compact rows, filters and paging so it stays quick with thousands of days. */
@@ -1958,7 +2038,7 @@ function viewOvrSettings(){
 function viewReports(){
   var r = rpData();
   var sel = function(k, label, opts){ return '<select class="input" data-ch="ui" data-k="' + k + '" style="width:auto" aria-label="' + label + '"><option value="">' + label + '</option>' + opts.map(function(o){ return '<option' + (o === UI[k] ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select>'; };
-  return '<div class="head"><div><h1>Reports</h1><p>Headcount left after approved PTO, and how requests and overrides are moving. Hover a bar for the numbers.</p></div></div>' +
+  return '<div class="head"><div><h1>Reports</h1><p>Headcount left after approved PTO, and how requests and overrides are moving. Hover a bar for the numbers, click any chart to see the data behind it.</p></div></div>' +
     '<div class="panel rpbar"><div class="bar">' + monthNav('rpMonth') + '<span class="grow"></span>' + sel('rpDept', 'All departments', depts()) + sel('rpRegion', 'All regions', regions()) + '<button class="btn primary" data-act="report">Extract report</button></div></div>' + (function(b){ return b.tiles + b.rest; })(reportBlocks(r));
 }
 
@@ -2018,10 +2098,11 @@ var TEMPLATE = 'Agent Name,Current Manager,Region,Department,Work Days,Rest Days
 function regionsOf(dept){ var r = pairs().filter(function(p){ return p[0] === dept; }).map(function(p){ return p[1]; }); return r.length ? r : regions(); }
 function viewSetup(){
   var st = S.settings, wk = st.min_notice_days > 0 && st.min_notice_days % 7 === 0;
-  var rules = '<section class="sect"><header><h2>Approval rules</h2><p>Every request goes to the agent manager first, with up to ' + (st.mgr_max_hours || 72) + ' hours to answer. After the manager approves, these rules decide it.</p></header><div class="pair">' +
+  var rules = '<section class="sect"><header><h2>Approval rules</h2><p>Every request goes to the agent manager first' + (st.mgr_window_off ? ', with no time limit to answer' : ', with up to ' + (st.mgr_max_hours || 72) + ' hours to answer') + '. After the manager approves, these rules decide it.</p></header><div class="pair">' +
     '<div class="field"><span>Decision</span><div class="seg"><button class="' + (st.approval_mode === 'auto' ? 'on' : '') + '" data-act="mode" data-v="auto">Automatic</button><button class="' + (st.approval_mode === 'manual' ? 'on' : '') + '" data-act="mode" data-v="manual">Manual review</button></div>' +
     '<p class="small muted">' + (st.approval_mode === 'auto' ? 'Approved if the day has an open slot. Requests for full days are recorded as rejected, ready for an override.' : 'Every request goes to the Pending tab, which appears while this is on, until an admin approves or rejects it. Short-notice requests sit in their own column.') + '</p></div>' +
-    '<div class="field"><span>Minimum notice before the requested date</span><div class="bar"><input class="input" type="number" min="0" max="365" id="noticeN" data-ch="notice" value="' + (wk ? st.min_notice_days / 7 : st.min_notice_days) + '" style="width:90px"><select class="input" id="noticeU" data-ch="notice" style="width:auto"><option value="1"' + (wk ? '' : ' selected') + '>days</option><option value="7"' + (wk ? ' selected' : '') + '>weeks</option></select></div><p class="small muted">' + (st.approval_mode === 'auto' ? 'Requests for dates sooner than this are rejected.' : 'Requests for dates sooner than this are marked short notice.') + ' Set 0 to turn it off.</p></div></div><div class="pair"><div class="field"><span>Manager approval window</span><div class="bar"><input class="input" type="number" min="1" max="168" id="mgrMax" data-ch="mgrwin" value="' + (st.mgr_max_hours || 72) + '" style="width:90px"><span class="small muted">hours</span></div><p class="small muted">One window for every request: the manager has this many hours from when the request is sent to answer. Every request goes through the manager first. Unanswered requests are rejected and the slot is released.</p></div></div></section>';
+    '<div class="field"><span>Minimum notice before the requested date</span><div class="bar"><input class="input" type="number" min="0" max="365" id="noticeN" data-ch="notice" value="' + (wk ? st.min_notice_days / 7 : st.min_notice_days) + '" style="width:90px"><select class="input" id="noticeU" data-ch="notice" style="width:auto"><option value="1"' + (wk ? '' : ' selected') + '>days</option><option value="7"' + (wk ? ' selected' : '') + '>weeks</option></select></div><p class="small muted">' + (st.approval_mode === 'auto' ? 'Requests for dates sooner than this are rejected.' : 'Requests for dates sooner than this are marked short notice.') + ' Set 0 to turn it off.</p></div></div><div class="pair"><div class="field"><span>Manager approval window</span><div class="seg"><button class="' + (st.mgr_window_off ? '' : 'on') + '" data-act="mgrOff" data-v="on">Time limit</button><button class="' + (st.mgr_window_off ? 'on' : '') + '" data-act="mgrOff" data-v="off">No time limit</button></div>' +
+      (st.mgr_window_off ? '<p class="small muted">No deadline: every request still goes to the manager first, but it waits for the answer. Nothing is rejected for lack of a response, and the slot stays held. Turn the time limit back on to start a fresh window for waiting requests.</p>' : '<div class="bar"><input class="input" type="number" min="1" max="168" id="mgrMax" data-ch="mgrwin" value="' + (st.mgr_max_hours || 72) + '" style="width:90px"><span class="small muted">hours</span></div><p class="small muted">One window for every request: the manager has this many hours from when the request is sent to answer. Every request goes through the manager first. Unanswered requests are rejected and the slot is released.</p>') + '</div></div></section>';
 
   var tzNow = curTZ();
   var tzSect = '<section class="sect"><header><h2>Timezone</h2><p>Roster shift times are entered in Manila time. Greenlight converts them to this timezone for the coverage table, schedules and reports. Today and the minimum notice also follow it.</p></header><div>' +
@@ -2051,41 +2132,42 @@ function viewSetup(){
   var tiles = depts().map(function(D){
     var rs = regionsOf(D), hc = S.roster.filter(function(a){ return a.department === D; }).length;
     return '<button class="dtile" data-act="openAlloc" data-v="' + esc(D) + '"><span class="mono" aria-hidden="true">' + esc(initials(D)) + '</span><b>' + esc(D) + '</b><span class="small muted">' + hc + (hc === 1 ? ' agent' : ' agents') + ' · ' + rs.length + (rs.length === 1 ? ' region' : ' regions') + '</span>' +
-      '<span class="small tn">' + rs.map(function(R){ var q = requiredOf(S, D, R, ym); return esc(R) + ' ' + (q != null ? 'auto' : defaultOf(S, D, R, ym)); }).join(' · ') + ' per day</span><span class="go">Set allocation ›</span></button>';
+      '<span class="small tn">' + rs.map(function(R){ var q = requiredOf(S, D, R, ym), pc = pctOf(S, D, R, ym); return esc(R) + ' ' + (pc != null ? pc + '% on duty' : q != null ? 'auto' : defaultOf(S, D, R, ym)); }).join(' · ') + ' per day</span><span class="go">Set allocation ›</span></button>';
   }).join('');
   return '<div class="head"><div><h1>Settings</h1><p>Only admins can see this page. Changes save as you make them.</p></div></div>' + rules + tzSect + pass + mgrSect + roster +
     '<section class="sect"><header><h2>PTO allocation</h2><p>How many people can be off per day. Pick a department to set its slots for every region.</p></header><div>' +
     (tiles ? '<div class="dtiles" style="--n:' + depts().length + '">' + tiles + '</div>' : '<p class="empty">Upload a roster first. Allocation is set per department and region.</p>') + '</div></section>';
 }
+function defLabel(k){ return k === 'pct' ? 'Percent of headcount needed' : k === 'required' ? 'Agents needed on duty' : 'Slots per day'; }
 function allocModal(m){
   var D = m.dept, ym = UI.setMonth, rs = regionsOf(D), y0 = +S.today.slice(0, 4), years = [];
   var ri = Math.max(0, Math.min(rs.length - 1, m.ri || 0)), R = rs[ri];
   var cov = m.cov && m.cov.d.slice(0, 7) === ym ? m.cov : {d:S.today.slice(0, 7) === ym ? S.today : ym + '-01'};
   for (var y = Math.min(y0 - 1, +ym.slice(0, 4)); y <= Math.max(y0 + 3, +ym.slice(0, 4)); y++) years.push(y);
-  var eff = defaultOf(S, D, R, ym), reqNow = requiredOf(S, D, R, ym), ovr = 0, team = S.roster.filter(function(a){ return a.department === D && a.region === R; });
+  var eff = defaultOf(S, D, R, ym), reqNow = requiredOf(S, D, R, ym), pctNow = pctOf(S, D, R, ym), auto = reqNow != null || pctNow != null, ovr = 0, team = S.roster.filter(function(a){ return a.department === D && a.region === R; });
   var sched = DOW.map(function(d){ return team.filter(function(a){ return workDays(a).indexOf(d) >= 0; }).length; });
   var grid = calendar(ym, function(iso, n){
     var base = baseAlloc(S, D, R, iso), o = S.overrides[akey(D, R, iso)], isO = o != null && o !== base, u = usedOf(D, R, iso), sc = sched[parse(iso).getUTCDay()]; if (isO) ovr++;
-    var slots = o != null ? o : base, hc = sc - slots, cv = cov.d === iso, low = hc <= 0 || (reqNow != null && hc < reqNow);
+    var slots = o != null ? o : base, hc = sc - slots, cv = cov.d === iso, need = needOf(S, D, R, iso), low = hc <= 0 || (need != null && hc < need);
     return '<div class="day aday' + (isO ? ' ovr' : '') + (sc ? '' : ' rest') + (cv ? ' cvsel' : '') + '" title="' + sc + ' scheduled to work, ' + u + ' already on approved PTO">' +
       '<button class="n nbtn" data-act="cov" data-d="' + iso + '" aria-label="Highlight ' + fmtDate(iso) + ' in the coverage table">' + n + '</button>' +
       '<span class="l tn kv2"><i>S</i><b>' + sc + '</b></span>' +
-      '<input type="number" min="0" max="999" inputmode="numeric" id="al-' + esc(R) + '-' + iso + '" data-ch="override" data-in="hc" data-sc="' + sc + '" data-eff="' + base + '" data-req="' + (reqNow != null ? reqNow : '') + '" data-r="' + esc(R) + '" data-d="' + iso + '" value="' + slots + '" aria-label="' + esc(R) + ' PTO slots on ' + fmtDate(iso) + ', ' + sc + ' scheduled">' +
+      '<input type="number" min="0" max="999" inputmode="numeric" id="al-' + esc(R) + '-' + iso + '" data-ch="override" data-in="hc" data-sc="' + sc + '" data-eff="' + base + '" data-req="' + (need != null ? need : '') + '" data-r="' + esc(R) + '" data-d="' + iso + '" value="' + slots + '" aria-label="' + esc(R) + ' PTO slots on ' + fmtDate(iso) + ', ' + sc + ' scheduled">' +
       '<span class="l tn kv2 hc' + (low ? ' low' : '') + '"><i>HC</i><b>' + hc + '</b></span></div>';
   });
   var nav = '<div class="rnav"><button class="btn icon rarrow" data-act="regStep" data-n="-1"' + (ri ? '' : ' disabled') + ' aria-label="Previous region">‹</button>' +
-    '<div class="rnav-mid"><h3>' + esc(R) + '</h3><span class="muted tn">' + team.length + (team.length === 1 ? ' agent' : ' agents') + ' · ' + (reqNow != null ? '<b class="auto">' + reqNow + ' needed on duty, slots worked out daily</b>' : 'default ' + eff + ' per day') + ' · region ' + (ri + 1) + ' of ' + rs.length + '</span>' +
+    '<div class="rnav-mid"><h3>' + esc(R) + '</h3><span class="muted tn">' + team.length + (team.length === 1 ? ' agent' : ' agents') + ' · ' + (pctNow != null ? '<b class="auto">' + pctNow + '% of agents needed on duty, slots worked out daily</b>' : reqNow != null ? '<b class="auto">' + reqNow + ' needed on duty, slots worked out daily</b>' : 'default ' + eff + ' per day') + ' · region ' + (ri + 1) + ' of ' + rs.length + '</span>' +
     '<span class="rdots">' + rs.map(function(x, k){ return '<button class="rdot' + (k === ri ? ' on' : '') + '" style="--rc:' + regionColor(x) + '" data-act="regGo" data-n="' + k + '" aria-label="' + esc(x) + '">' + esc(x) + '</button>'; }).join('') + '</span>' +
     (ovr ? '<button class="btn ghost sm" data-act="clearOvr" data-r="' + esc(R) + '">Reset ' + ovr + ' adjusted</button>' : '') + '</div>' +
     '<button class="btn icon rarrow" data-act="regStep" data-n="1"' + (ri < rs.length - 1 ? '' : ' disabled') + ' aria-label="Next region">›</button></div>';
   return shell(esc(D), 'PTO slots per day, by region',
-    '<div class="applybar compact"><label class="field"><span>Set</span><select class="input" id="defKind" data-ch="defKind"><option value="slots"' + (UI.defKind === 'required' ? '' : ' selected') + '>PTO slots per day</option><option value="required"' + (UI.defKind === 'required' ? ' selected' : '') + '>Required headcount per day</option></select></label>' +
-    '<label class="field"><span id="defNLabel">' + (UI.defKind === 'required' ? 'Agents needed on duty' : 'Slots per day') + '</span><input class="input" type="number" min="0" max="9999" inputmode="numeric" id="defN" placeholder="0"></label>' +
+    '<div class="applybar compact"><label class="field"><span>Set</span><select class="input" id="defKind" data-ch="defKind"><option value="slots"' + (UI.defKind === 'required' || UI.defKind === 'pct' ? '' : ' selected') + '>PTO slots per day</option><option value="required"' + (UI.defKind === 'required' ? ' selected' : '') + '>Required headcount per day</option><option value="pct"' + (UI.defKind === 'pct' ? ' selected' : '') + '>% of headcount needed</option></select></label>' +
+    '<label class="field"><span id="defNLabel">' + defLabel(UI.defKind) + '</span><input class="input" type="number" min="0" max="9999" inputmode="numeric" id="defN" placeholder="0"></label>' +
     '<label class="field"><span>Apply to</span><select class="input" id="defRegion"><option value="">All regions</option>' + rs.map(function(x){ return '<option' + (x === R ? '' : '') + '>' + esc(x) + '</option>'; }).join('') + '</select></label>' +
     '<label class="field"><span>Month</span><select class="input" id="defMonth" data-ch="defMonthSel"><option value="*">All months</option>' + MONTHS.map(function(n, i){ return '<option value="' + pad(i + 1) + '"' + (+ym.slice(5) === i + 1 ? ' selected' : '') + '>' + n + '</option>'; }).join('') + '</select></label>' +
     '<label class="field"><span>Year</span><select class="input" id="defYear">' + years.map(function(y){ return '<option' + (y === +ym.slice(0, 4) ? ' selected' : '') + '>' + y + '</option>'; }).join('') + '</select></label>' +
-    '<button class="btn primary sm" data-act="applyDefault">Apply</button>' + (reqNow != null ? '<button class="btn ghost sm" data-act="clearReq">Stop auto for ' + esc(R) + '</button>' : '') + '</div>' +
-    '<div class="bar"><p class="grow small muted keyline"><span><b>S</b> agents scheduled to work that day</span><span><b>Box</b> PTO slots for the day</span><span><b>HC</b> headcount left if every slot is taken</span><span><b>Required headcount</b> slots = S minus agents needed, worked out for every day</span></p>' + monthNav('setMonth') + '</div>' +
+    '<button class="btn primary sm" data-act="applyDefault">Apply</button>' + (auto ? '<button class="btn ghost sm" data-act="clearReq">Stop auto for ' + esc(R) + '</button>' : '') + '</div>' +
+    '<div class="bar"><p class="grow small muted keyline"><span><b>S</b> agents scheduled to work that day</span><span><b>Box</b> PTO slots for the day</span><span><b>HC</b> headcount left if every slot is taken</span><span><b>Required headcount or % of headcount</b> slots = S minus agents needed (the % is rounded up), worked out for every day</span></p>' + monthNav('setMonth') + '</div>' +
     '<div class="rpanel" style="--rc:' + regionColor(R) + '">' + nav + monthCov(team, D, R, ym, eff, cov.d) + '<div class="rcal">' + grid + '</div></div>', 'wide solid');
 }
 
@@ -2265,10 +2347,8 @@ function buildReport(){
   if (hcOn){
     var wk = hd.days.filter(function(x){ return x.sch; }), low = null, below = 0, sm = 0, off = 0, sch = 0;
     wk.forEach(function(x){ sm += x.after; off += x.off; sch += x.sch; if (!low || x.after < low.after) low = x; if (x.req != null && x.after < x.req) below++; });
-    dash.push([T('Avg headcount after PTO', 10), T('Coverage kept', 10), T('Lowest day', 10), T('Days below required', 10)]);
-    dash.push([N(wk.length ? Math.round(sm / wk.length * 10) / 10 : 0, 11), T((sch ? Math.round((sch - off) / sch * 100) : 100) + '%', 11), T(low ? low.after + ' on ' + fmtShort(low.iso) : 'None', 11), N(below, 11)]);
-    dash.push([T('Approved', 10), T('Rejected', 10), T('Pending', 10)]);
-    dash.push([N(tot.approved, 11), N(tot.rejected, 11), N(tot.pending, 11)]);
+    dash.push([T('Avg headcount after PTO', 10), T('Coverage kept', 10), T('Approved', 10), T('Rejected', 10), T('Pending', 10)]);
+    dash.push([N(wk.length ? Math.round(sm / wk.length) : 0, 11), T((sch ? Math.round((sch - off) / sch * 100) : 100) + '%', 11), N(tot.approved, 11), N(tot.rejected, 11), N(tot.pending, 11)]);
   } else {
     dash.push([T('Approved', 10), T('Rejected', 10), T('Pending', 10), T('Busiest day', 10)]);
     dash.push([N(tot.approved, 11), N(tot.rejected, 11), N(tot.pending, 11), T(peak ? fmtShort(peak) + ' (' + peakN + ' off)' : 'None', 11)]);
@@ -2358,6 +2438,7 @@ function renderModal(keep){
   still = !!keep;
   if (m.type === 'cal') h = calModal();
   else if (m.type === 'alloc') h = allocModal(m);
+  else if (m.type === 'chart') h = chartModal(m);
   else if (m.type === 'bulk'){
     var who = m.ids.map(function(id){ return S.requests.find(function(x){ return x.id === id; }); }).filter(Boolean), ap = m.action === 'approve';
     h = shell((ap ? 'Approve ' : 'Reject ') + (m.all ? 'all ' : '') + who.length + (who.length === 1 ? ' override request' : ' override requests'), ap ? 'Each request becomes approved and is marked as an admin override.' : 'Each request stays rejected and the override request is closed.',
@@ -2398,12 +2479,12 @@ function renderModal(keep){
     var mx = S.settings.mgr_max_hours || 72, mgrN = m.manager || 'your manager';
     var due = m.results.filter(function(r){ return r.mgr_deadline; }).map(function(r){ return r.mgr_deadline; }).sort()[0], jsteps;
     if (c.awaiting) jsteps = [{c:'done', t:'Submitted', d:'Sent just now.'},
-      {c:'now', t:'Manager approval', d:mgrN + ' has ' + mx + ' hours to answer' + (due ? ' (earliest reply due ' + fmtStamp(due) + ')' : '') + '. Your slot is held for you meanwhile. With no answer in time the request is rejected and the slot is released.'},
+      {c:'now', t:'Manager approval', d:winOff() ? mgrN + ' has no deadline to answer. Your slot is held for you until they do.' : mgrN + ' has ' + mx + ' hours to answer' + (due ? ' (earliest reply due ' + fmtStamp(due) + ')' : '') + '. Your slot is held for you meanwhile. With no answer in time the request is rejected and the slot is released.'},
       {c:'idle', t:'Automated WFM review', d:'After your manager approves, the notice period and slot allocation decide the final result.'}];
     else jsteps = [{c:'done', t:'Submitted', d:'Sent just now.'}, {c:'skip', t:'Manager approval', d:'Not needed for ' + (m.results.length === 1 ? 'this date' : 'these dates') + '. It is short notice or has no open slot, so there is no manager step.'},
       c.rejected && !c.approved && !c.pending ? {c:'bad', t:'Automated WFM review', d:'Not approved by the notice or allocation rules. The reasons are listed below.'} : c.pending && !c.approved && !c.rejected ? {c:'now', t:'Automated WFM review', d:'With WFM for review.'} : {c:'done', t:'Automated WFM review', d:'Decided by the notice and allocation rules. The results are listed below.'}];
     h = shell(title, esc(m.name) + ' · ' + esc(m.dept) + ' · ' + esc(m.region),
-      (c.awaiting ? '<p class="note"><b>Your manager has ' + mx + ' hours to approve.</b></p>' : '') + tlHtml(jsteps) +
+      (c.awaiting ? '<p class="note"><b>' + (winOff() ? 'Your manager has no deadline, your slot is held until they answer.' : 'Your manager has ' + mx + ' hours to approve.') + '</b></p>' : '') + tlHtml(jsteps) +
       '<div class="chips">' + chips + '</div><ul class="sumlist">' + m.results.map(function(r){ return '<li><b>' + fmtDate(r.date) + '</b><span class="pill ' + r.status + '">' + statusLabel(r.status) + '</span><small>' + esc(r.reason) + (r.mgr_deadline ? ' · Reply due ' + fmtStamp(r.mgr_deadline) : '') + (r.override_requested ? ' · Override requested, waiting for admin review' : '') + '</small></li>'; }).join('') + '</ul>' +
       '<p class="small muted">To check on a request later, tap its date on your calendar. You can edit it until your manager answers, or cancel it.</p><div class="actions"><button class="btn ghost" data-act="closeModal">Close</button><button class="btn primary" data-act="tlBack" autofocus>View my calendar</button></div>');
   }
@@ -2519,14 +2600,20 @@ var ACT = {
   bgClose: function(el, e){ if (e.target === el) closeModal(); },
   chooseAgent: function(el){ UI.agentId = el.dataset.id; UI.role = 'gsd'; lsSet('greenlight_agent', UI.agentId); lsSet('greenlight_role', 'gsd'); UI.q = ''; UI.picked.clear(); UI.askOvr = false; UI.ovText = ''; UI.view = 'welcome'; UI.fromGuide = false; render(); scrollToY(0); },
   openCal: function(){ openModal({type:'cal'}); },
+  chartDay: function(el){ openModal({type:'chart', kind:'day', d:el.dataset.d}); },
+  chartStatus: function(el){ openModal({type:'chart', kind:'status', v:el.dataset.v}); },
+  chartTeam: function(el){ openModal({type:'chart', kind:'team', dept:el.dataset.dept, region:el.dataset.region}); },
+  chartOvr: function(el){ openModal({type:'chart', kind:'ovr', t:el.dataset.t, s:el.dataset.s}); },
   openAlloc: function(el){ openModal({type:'alloc', dept:el.dataset.v}); },
-  applyDefault: function(){ var m = UI.modal, v = val('defN').trim(), kind = val('defKind') === 'required' ? 'required' : 'slots';
-    if (v === ''){ toast(kind === 'required' ? 'Enter how many agents must stay on duty.' : 'Enter the number of slots per day.', true); return; }
+  applyDefault: function(){ var m = UI.modal, v = val('defN').trim(), kind = val('defKind') === 'required' ? 'required' : val('defKind') === 'pct' ? 'pct' : 'slots';
+    if (v === ''){ toast(kind === 'pct' ? 'Enter the percent of headcount needed on duty.' : kind === 'required' ? 'Enter how many agents must stay on duty.' : 'Enter the number of slots per day.', true); return; }
     var mm = val('defMonth'), all = mm === '*', R = val('defRegion'), month = all ? '*' : val('defYear') + '-' + mm, regs = R ? [R] : regionsOf(m.dept);
     if (!all) UI.setMonth = month;
-    var done = function(r){ if (!r.error) toast((kind === 'required' ? 'Required headcount set: ' : 'Default applied: ') + (R || 'all regions') + ', ' + (all ? 'all months' : fmtMonth(month))); };
-    if (kind === 'required') call('setRequired', {department:m.dept, regions:regs, month:month, clear_all:all, headcount:clampInt(v, 0, 9999)}).then(done);
+    var done = function(r){ if (!r.error) toast((kind === 'pct' ? 'Headcount needed set to ' + clampInt(v, 0, 100) + '%: ' : kind === 'required' ? 'Required headcount set: ' : 'Default applied: ') + (R || 'all regions') + ', ' + (all ? 'all months' : fmtMonth(month))); };
+    if (kind === 'pct') call('setRequired', {department:m.dept, regions:regs, month:month, clear_all:all, mode:'pct', headcount:clampInt(v, 0, 100)}).then(done);
+    else if (kind === 'required') call('setRequired', {department:m.dept, regions:regs, month:month, clear_all:all, headcount:clampInt(v, 0, 9999)}).then(done);
     else call('setDefaults', {department:m.dept, regions:regs, month:month, clear_all:all, slots:clampInt(v, 0, 999)}).then(done); },
+  mgrOff: function(el){ call('saveSettings', settingsPayload({mgr_window_off:el.dataset.v === 'off'})).then(saved); },
   clearReq: function(){ var m = UI.modal, R = regionsOf(m.dept)[Math.max(0, m.ri || 0)];
     call('setRequired', {department:m.dept, regions:[R], month:'*', headcount:null}).then(function(r){ if (!r.error) toast(R + ' is back to default slots'); }); },
   cov: function(el){ UI.modal.cov = {d:el.dataset.d}; renderModal(true); },
@@ -2587,7 +2674,7 @@ var slotVal = function(el){ var v = el.value.trim(); return v === '' ? null : cl
 var CH = {
   apPick: function(el){ var sel = UI.ap.sel, i = sel.indexOf(el.dataset.id); if (el.checked && i < 0) sel.push(el.dataset.id); if (!el.checked && i >= 0) sel.splice(i, 1); render(); },
   apAll: function(el){ var scope = awaitingMine().filter(function(q){ return S.isAdmin ? (!UI.apMgr || q.manager === UI.apMgr) : true; }); UI.ap.sel = el.checked ? scope.map(function(q){ return q.id; }) : []; render(); },
-  defKind: function(el){ UI.defKind = el.value; var l = document.getElementById('defNLabel'); if (l) l.textContent = el.value === 'required' ? 'Agents needed on duty' : 'Slots per day'; },
+  defKind: function(el){ UI.defKind = el.value; var l = document.getElementById('defNLabel'); if (l) l.textContent = defLabel(el.value); var n = document.getElementById('defN'); if (n){ n.max = el.value === 'pct' ? 100 : 9999; n.placeholder = el.value === 'pct' ? '%' : '0'; } },
   ov: function(el){ UI.ov[el.dataset.k] = el.value; UI.ov.sel = []; render(); },
   ovPick: function(el){ var s = UI.ov.sel, i = s.indexOf(el.dataset.id); if (el.checked && i < 0) s.push(el.dataset.id); if (!el.checked && i >= 0) s.splice(i, 1); render(); },
   ovAll: function(el){ UI.ov.sel = el.checked ? ovList().map(function(q){ return q.id; }) : []; render(); },
@@ -2641,6 +2728,7 @@ document.addEventListener('keydown', function(e){
   if (!UI.modal && UI.view === 'welcome' && (e.key === 'ArrowRight' || e.key === 'ArrowLeft') && !/INPUT|TEXTAREA|SELECT/.test((e.target || {}).tagName || '')){
     var b = document.querySelector('.wnav.' + (e.key === 'ArrowRight' ? 'next' : 'prev')); if (b && !b.disabled){ e.preventDefault(); b.click(); } }
   if (UI.modal && UI.modal.type === 'alloc' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !(e.target.matches && e.target.matches('input,select,textarea'))){ var nrs = regionsOf(UI.modal.dept).length, ni = (UI.modal.ri || 0) + (e.key === 'ArrowRight' ? 1 : -1); if (ni >= 0 && ni < nrs){ UI.modal.ri = ni; renderModal(true); } }
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[role=button][data-act]:not(button)')){ e.preventDefault(); e.target.click(); }
   if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('label.btn')){ e.preventDefault(); e.target.click(); }
 });
 document.addEventListener('focusout', function(){ setTimeout(function(){ if (!UI.dirty) return; var ae = document.activeElement; if (ae && ae.closest && ae.closest('#main, #modalRoot') && /INPUT|TEXTAREA/.test(ae.tagName)) return; UI.dirty = false; render(); }, 350); });
