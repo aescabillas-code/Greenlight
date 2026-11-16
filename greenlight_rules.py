@@ -9,12 +9,16 @@ def notice_text(days: int) -> str:
     return f"{days} day" + ("" if days == 1 else "s")
 
 
-def resolve_allocation(day_override, month_default, standing_default, required=None, scheduled=0) -> int:
+def resolve_allocation(day_override, month_default, standing_default, required=None, scheduled=0, required_pct=None) -> int:
     """A day's own number wins. Next, if a required headcount is set, slots are the agents
     scheduled that day minus the agents who must stay on duty (never below 0).
     Otherwise the month's default, then the every-month default."""
     if day_override is not None:
         return int(day_override)
+    if required_pct is not None:
+        # Percent of headcount needed on duty, rounded up: slots = scheduled - ceil(scheduled * pct / 100).
+        needed = (int(scheduled) * int(required_pct) + 99) // 100
+        return max(0, int(scheduled) - needed)
     if required is not None:
         return max(0, int(scheduled) - int(required))
     for value in (month_default, standing_default):
