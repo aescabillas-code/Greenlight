@@ -122,6 +122,7 @@ def get_settings(db) -> dict:
         "min_notice_days": int(cfg.get("min_notice_days", 14)),
         "timezone": cfg.get("timezone", "Asia/Manila"),
         "mgr_max_hours": int(cfg.get("mgr_max_hours", MGR_MAX_DEFAULT)),
+        "mgr_window_off": bool(cfg.get("mgr_window_off", False)),
         "ovr_reject_hours": int(cfg.get("ovr_reject_hours", OVR_REJECT_DEFAULT)),
     }
 
@@ -132,17 +133,18 @@ def allocation_for(db, department: str, region: str, iso: str) -> int:
         (a["kind"], a["key"]): a["slots"]
         for a in db.allocations.find(
             {"department": department, "region": region,
-             "$or": [{"kind": "day", "key": iso}, {"kind": {"$in": ["default", "required"]}, "key": {"$in": [iso[:7], "*"]}}]}
+             "$or": [{"kind": "day", "key": iso}, {"kind": {"$in": ["default", "required", "requiredpct"]}, "key": {"$in": [iso[:7], "*"]}}]}
         )
     }
     required = found.get(("required", iso[:7]), found.get(("required", "*")))
+    required_pct = found.get(("requiredpct", iso[:7]), found.get(("requiredpct", "*")))
     scheduled = 0
-    if required is not None and found.get(("day", iso)) is None:
+    if (required is not None or required_pct is not None) and found.get(("day", iso)) is None:
         weekday = date.fromisoformat(iso).strftime("%a")  # Mon, Tue, ...
         scheduled = db.roster.count_documents({"department": department, "region": region,
                                                "work_days": {"$regex": f"(^|,){weekday}(,|$)"}})
     return resolve_allocation(found.get(("day", iso)), found.get(("default", iso[:7])), found.get(("default", "*")),
-                              required=required, scheduled=scheduled)
+                              required=required, scheduled=scheduled, required_pct=required_pct)
 
 
 def _iso(stamp) -> str:
@@ -150,7 +152,10 @@ def _iso(stamp) -> str:
 
 
 def mgr_deadline(settings: dict, submitted: datetime, iso: str, now: datetime):
-    """When the manager must answer by: one fixed window from when the request was sent (72 hours by default)."""
+    """When the manager must answer by: one fixed window from when the request was sent (72 hours by default).
+    None when WFM turned the window off: the request then waits for the manager with no deadline."""
+    if settings.get("mgr_window_off"):
+        return None
     return submitted + timedelta(hours=settings["mgr_max_hours"])
 
 
@@ -220,10 +225,116 @@ def serialize_request(doc: dict) -> dict:
     }
 
 
+def _utc(stamp):
+    return stamp.replace(tzinfo=timezone.utc) if isinstance(stamp, datetime) and stamp.tzinfo is None else stamp
+
+
 def manager_list(db) -> list:
+    """Every manager on the roster: whether a passcode is set, whether they asked for a reset, and until when
+    their set-up / reset link works."""
     names = sorted({n for n in db.roster.distinct("manager") if n})
-    have = {m["_id"] for m in db.managers.find({}, {"_id": 1})}
-    return [{"name": n, "set": n in have} for n in names]
+    now = datetime.now(timezone.utc)
+    docs = {m["_id"]: m for m in db.managers.find({}, {"passcode": 1, "reset_requested": 1, "setup_expires": 1, "setup_hash": 1})}
+    out = []
+    for n in names:
+        m = docs.get(n) or {}
+        until = _utc(m.get("setup_expires")) if m.get("setup_hash") else None
+        out.append({"name": n, "set": bool(m.get("passcode")), "reset_at": _iso(m.get("reset_requested")),
+                    "link_until": _iso(until) if until and until > now else ""})
+    return out
+
+
+SETUP_HOURS = 48   # how long a passcode set-up / reset link works
+
+
+def app_url() -> str:
+    """The address people open the app at, used to build manager set-up links."""
+    try:
+        url = getattr(st.context, "url", None)
+        if url:
+            return str(url).split("?")[0].replace("/~/+", "")
+    except Exception:
+        pass
+    try:
+        host = st.context.headers.get("host")
+        if host:
+            return f"https://{host}/"
+    except Exception:
+        pass
+    return ""
+
+
+def setup_lookup(db, token: str):
+    """What a set-up link points to: the manager's name, or why it no longer works."""
+    if not token:
+        return None
+    doc = db.managers.find_one({"setup_hash": hashlib.sha256(token.encode()).hexdigest()})
+    if not doc or not db.roster.find_one({"manager": doc["_id"]}):
+        return {"ok": False, "reason": "used"}
+    if _utc(doc.get("setup_expires")) is None or _utc(doc["setup_expires"]) < datetime.now(timezone.utc):
+        return {"ok": False, "reason": "expired", "name": doc["_id"]}
+    return {"ok": True, "name": doc["_id"], "reset": bool(doc.get("passcode"))}
+
+
+def do_manager_link(db, payload: dict) -> dict:
+    """WFM makes a one-time link for a manager to set (or reset) their own passcode. A new link replaces the old one.
+    The current passcode keeps working until the manager sets a new one."""
+    name = clean(payload.get("name"))
+    if not db.roster.find_one({"manager": name}):
+        return {"error": "That manager is not on the roster."}
+    token = secrets.token_urlsafe(24)
+    until = datetime.now(timezone.utc) + timedelta(hours=SETUP_HOURS)
+    db.managers.update_one({"_id": name}, {"$set": {"setup_hash": hashlib.sha256(token.encode()).hexdigest(), "setup_expires": until},
+                                           "$unset": {"reset_requested": ""}}, upsert=True)
+    return {"ok": True, "token": token, "expires": _iso(until), "base": app_url()}
+
+
+def do_manager_setup(db, payload: dict) -> dict:
+    """The manager opened their link and chose a passcode: save it, close the link, and sign them in."""
+    token = clean(st.query_params.get("mgrsetup", "") or payload.get("token"), 200)
+    info = setup_lookup(db, token)
+    if not info or not info["ok"]:
+        return {"error": "This link has expired or was already used. Ask WFM for a new one."}
+    code = str(payload.get("passcode", ""))
+    if len(code) < 8:
+        return {"error": "Use 8 characters or more for the passcode."}
+    name = info["name"]
+    db.managers.update_one({"_id": name}, {"$set": {"passcode": hash_password(code)},
+                                           "$unset": {"setup_hash": "", "setup_expires": "", "reset_requested": ""}})
+    try:
+        del st.query_params["mgrsetup"]
+    except Exception:
+        pass
+    st.session_state.update({"manager": name, "is_admin": False, "is_dev": False, "is_override": False, "login_tries": 0})
+    return {"ok": True, "token": new_session(db, manager=name), "name": name}
+
+
+def do_manager_forgot(db, payload: dict) -> dict:
+    """A manager forgot their passcode: flag it for WFM, who sends a reset link. Nothing else changes."""
+    name = clean(payload.get("name"))
+    if st.session_state.get("forgot_tries", 0) >= 5:
+        return {"error": "WFM has already been told. Please contact them directly."}
+    if not db.roster.find_one({"manager": name}):
+        return {"error": "That manager is not on the roster."}
+    st.session_state["forgot_tries"] = st.session_state.get("forgot_tries", 0) + 1
+    db.managers.update_one({"_id": name}, {"$set": {"reset_requested": datetime.now(timezone.utc)}}, upsert=True)
+    return {"ok": True}
+
+
+def do_manager_change(db, payload: dict) -> dict:
+    """A signed-in manager changes their own passcode."""
+    name = st.session_state.get("manager")
+    if not name:
+        return {"error": "Sign in as a manager first."}
+    doc = db.managers.find_one({"_id": name}) or {}
+    salt, _, digest = str(doc.get("passcode", "")).partition("$")
+    if not digest or not hmac.compare_digest(hash_password(str(payload.get("current", "")), salt), doc["passcode"]):
+        return {"error": "The current passcode is not right."}
+    code = str(payload.get("next", ""))
+    if len(code) < 8:
+        return {"error": "Use 8 characters or more for the new passcode."}
+    db.managers.update_one({"_id": name}, {"$set": {"passcode": hash_password(code)}, "$unset": {"reset_requested": ""}})
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------- actions
@@ -310,8 +421,8 @@ def do_login(db, payload: dict) -> dict:
             return {"error": "Too many attempts. Reload the page and try again."}
         name = clean(payload.get("manager"))
         doc = db.managers.find_one({"_id": name})
-        if not doc or not db.roster.find_one({"manager": name}):
-            return {"error": "That manager has no passcode yet. Ask WFM to set one in Settings."}
+        if not doc or not doc.get("passcode") or not db.roster.find_one({"manager": name}):
+            return {"error": "You have no passcode yet. Open the set-up link WFM sent you, or tap Forgot passcode to ask for one."}
         salt, _, digest = str(doc.get("passcode", "")).partition("$")
         ok = bool(digest) and hmac.compare_digest(hash_password(str(payload.get("password", "")), salt), doc["passcode"])
         if not ok:
@@ -540,7 +651,9 @@ def do_edit_mine(db, payload: dict) -> dict:
             return {"error": "You already have a request for that date."}
         team = {"department": doc["department"], "region": doc["region"]}
         deadline = mgr_deadline(settings, doc["submitted_at"].replace(tzinfo=timezone.utc), iso, now)
-        change.update({"date": iso, "mgr_deadline": deadline})
+        change.update({"date": iso})
+        if deadline:
+            change["mgr_deadline"] = deadline
         try:
             with day_lock(db, team["department"], team["region"], iso):
                 if team_used(db, team, iso, exclude=doc["_id"]) >= allocation_for(db, team["department"], team["region"], iso):
@@ -561,7 +674,7 @@ def do_set_manager_passcode(db, payload: dict) -> dict:
         return {"error": "That manager is not on the roster."}
     if len(code) < 8:
         return {"error": "Use 8 characters or more for the passcode."}
-    db.managers.update_one({"_id": name}, {"$set": {"passcode": hash_password(code)}}, upsert=True)
+    db.managers.update_one({"_id": name}, {"$set": {"passcode": hash_password(code)}, "$unset": {"reset_requested": ""}}, upsert=True)
     return {"ok": True}
 
 
@@ -621,6 +734,20 @@ def handle(db, event: dict) -> dict:
     if kind in MANAGER_ACTIONS:
         ids = [payload.get("id")] if kind == "mgrDecide" else list(payload.get("ids") or [])[:200]
         return do_manager_decide(db, ids, "approved" if payload.get("status") == "approved" else "rejected", clean(payload.get("reason"), 500))
+    if kind == "managerLink":
+        return do_manager_link(db, payload) if st.session_state.get("is_admin") else {"error": "Admin sign-in required."}
+    if kind == "mgrSetup":
+        return do_manager_setup(db, payload)
+    if kind == "mgrSetupDismiss":
+        try:
+            del st.query_params["mgrsetup"]
+        except Exception:
+            pass
+        return {"ok": True}
+    if kind == "mgrForgot":
+        return do_manager_forgot(db, payload)
+    if kind == "mgrChangePass":
+        return do_manager_change(db, payload)
     if kind == "setManagerPasscode":
         return do_set_manager_passcode(db, payload) if st.session_state.get("is_admin") else {"error": "Admin sign-in required."}
     can_override = bool(st.session_state.get("is_override") or st.session_state.get("is_dev"))
@@ -649,12 +776,23 @@ def handle(db, event: dict) -> dict:
         mode = "manual" if payload.get("approval_mode") == "manual" else "auto"
         notice = max(0, min(365, int(payload.get("min_notice_days", 14))))
         mx = max(1, min(168, int(payload.get("mgr_max_hours", MGR_MAX_DEFAULT))))
-        change = {"approval_mode": mode, "min_notice_days": notice, "mgr_max_hours": mx}
+        window_off = bool(payload.get("mgr_window_off", False))
+        change = {"approval_mode": mode, "min_notice_days": notice, "mgr_max_hours": mx, "mgr_window_off": window_off}
         if payload.get("timezone"):
             if safe_zone(payload["timezone"]) != payload["timezone"]:
                 return {"error": "That timezone is not recognised."}
             change["timezone"] = payload["timezone"]
+        before = get_settings(db)
         db.settings.update_one({"_id": "config"}, {"$set": change}, upsert=True)
+        if window_off and not before["mgr_window_off"]:
+            # No window: requests already waiting lose their deadline, so none of them expires.
+            db.requests.update_many({"status": "awaiting"}, {"$unset": {"mgr_deadline": ""}})
+        elif not window_off and before["mgr_window_off"]:
+            # Window turned back on: waiting requests get a fresh window from now.
+            now = datetime.now(timezone.utc)
+            db.requests.update_many({"status": "awaiting", "mgr_deadline": {"$exists": False}},
+                                    {"$set": {"mgr_deadline": now + timedelta(hours=mx), "mgr_reminded": False}})
+        bump_version(db)
         return {"ok": True}
     if kind == "setDefault":
         month = str(payload.get("month", ""))
@@ -671,28 +809,36 @@ def handle(db, event: dict) -> dict:
             if result.get("error"):
                 return result
             # Fixed slots replace a required headcount for the same months.
-            gone = {"kind": "required", "department": clean(one["department"]), "region": clean(region)}
+            gone = {"kind": {"$in": ["required", "requiredpct"]}, "department": clean(one["department"]), "region": clean(region)}
             db.allocations.delete_many(gone if month == "*" else {**gone, "key": month})
             # "All months" replaces any single-month defaults, so every calendar shows the new number.
             if month == "*" and payload.get("clear_all"):
                 db.allocations.delete_many({"kind": "default", "department": clean(one["department"]),
                                             "region": clean(region), "key": {"$ne": "*"}})
         return {"ok": True}
-    if kind == "setRequired":  # agents that must stay on duty; slots are worked out from the roster each day
+    if kind == "setRequired":  # agents (or % of agents) that must stay on duty; slots are worked out from the roster each day
         month = str(payload.get("month", ""))
         if month != "*" and not ISO_MONTH.match(month):
             return {"error": "That month is not valid."}
+        pct_mode = payload.get("mode") == "pct"
+        mine, other = ("requiredpct", "required") if pct_mode else ("required", "requiredpct")
         for region in (payload.get("regions") or [])[:50]:
-            spot = {"kind": "required", "department": clean(payload.get("department")), "region": clean(region)}
-            if not spot["department"] or not spot["region"]:
+            base = {"department": clean(payload.get("department")), "region": clean(region)}
+            if not base["department"] or not base["region"]:
                 return {"error": "Choose a department and region first."}
-            if payload.get("headcount") is None:
-                db.allocations.delete_many(spot if month == "*" else {**spot, "key": month})
+            scope = {} if month == "*" else {"key": month}
+            if payload.get("headcount") is None:  # stop auto: remove both kinds
+                db.allocations.delete_many({**base, "kind": {"$in": ["required", "requiredpct"]}, **scope})
                 continue
-            n = max(0, min(9999, int(payload.get("headcount"))))
-            db.allocations.update_one({**spot, "key": month}, {"$set": {"slots": n}}, upsert=True)
+            n = max(0, min(100 if pct_mode else 9999, int(payload.get("headcount"))))
+            db.allocations.update_one({**base, "kind": mine, "key": month}, {"$set": {"slots": n}}, upsert=True)
+            # The other way of setting it is replaced for the same months.
             if month == "*" and payload.get("clear_all"):
-                db.allocations.delete_many({**spot, "key": {"$ne": "*"}})
+                db.allocations.delete_many({**base, "kind": other})
+            else:
+                db.allocations.delete_many({**base, "kind": other, "key": month})
+            if month == "*" and payload.get("clear_all"):
+                db.allocations.delete_many({**base, "kind": mine, "key": {"$ne": "*"}})
         return {"ok": True}
     if kind == "changePassword":
         return do_change_password(db, payload)
@@ -809,17 +955,20 @@ def _build_base(db) -> dict:
     today = today_iso(db)
     cutoff = (date.fromisoformat(today) - timedelta(days=400)).isoformat()
     settings = get_settings(db)
-    defaults, required, overrides = {}, {}, {}
+    defaults, required, required_pct, overrides = {}, {}, {}, {}
     for a in db.allocations.find({}):
         pair = f"{a['department']}|{a['region']}"
         if a["kind"] == "default":
             defaults.setdefault(pair, {})[a["key"]] = int(a["slots"])
         elif a["kind"] == "required":
             required.setdefault(pair, {})[a["key"]] = int(a["slots"])
+        elif a["kind"] == "requiredpct":
+            required_pct.setdefault(pair, {})[a["key"]] = int(a["slots"])
         elif a["key"] >= cutoff:
             overrides[f"{pair}|{a['key']}"] = int(a["slots"])
     settings["defaults"] = defaults
     settings["required"] = required
+    settings["required_pct"] = required_pct
     return {
         "today": today,
         "settings": settings,
@@ -862,6 +1011,8 @@ def page_state(db, force: bool = False) -> dict:
         "isManager": bool(st.session_state.get("manager")),
         "managerName": st.session_state.get("manager", ""),
         "managers": (sh["mgrs"] or []) if is_admin else [],
+        "setup": setup_lookup(db, clean(st.query_params.get("mgrsetup", ""), 200)),
+        "appUrl": app_url() if is_admin else "",
     }
 
 

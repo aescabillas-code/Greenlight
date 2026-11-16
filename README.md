@@ -57,7 +57,7 @@ For each date, in this order:
 3. Automatic, and the date is sooner than the minimum notice: rejected.
 4. Automatic: approved if approved requests for that department, region and day are below the allocation. Otherwise it is recorded as rejected, so an admin can still override it.
 
-Allocation for a day is the day's own number if one was set; else, if a required headcount is set, the agents scheduled that day minus the required headcount (never below 0); else that month's default, else the every-month default, else 0.
+Allocation for a day is the day's own number if one was set; else, if a required headcount is set, the agents scheduled that day minus the required headcount (never below 0); if a **percent of headcount needed** is set instead, the agents scheduled that day minus that percent of them, rounded up (for example 10 scheduled and 70% needed leaves 3 slots; setting one replaces the other for the same months); else that month's default, else the every-month default, else 0.
 An Admin override (decided by the Admin role) approves a rejected request even when the day is full, and stores the reason.
 
 Override requests: when a picked date is inside the notice window or has no slot left, the agent can select **Request override** and give a reason. In automatic mode the date is still rejected right away, but it is recorded with the reason. Every open override request goes to the admin **Override requests** tab, split into **Short notice** and **No allocation**, filtered by month and year. Admins can approve or reject one, select several and decide them together, or reject all shown. Approving asks for one reason, which is saved on each request.
@@ -106,11 +106,20 @@ Manager passcodes are set by WFM in Settings > Manager sign-in (hashed in the `m
 ## How a request moves
 
 1. The agent submits and a pop-up shows the journey: Submitted, Manager approval, Automated WFM review, with the manager's deadline. If the date has an open slot and enough time is left, the request is **Awaiting manager** and the slot is held, so nobody else can take it.
-2. The manager has one approval window, 72 hours by default, counted from when the request is sent. WFM can change it in Settings > Approval rules, next to the minimum notice (`mgr_max_hours`).
+2. The manager has one approval window, 72 hours by default, counted from when the request is sent. WFM can change it in Settings > Approval rules, next to the minimum notice (`mgr_max_hours`), or choose **No time limit** (`mgr_window_off`): requests still go to the manager first but wait for the answer, nothing is auto-rejected for silence, and no reminder is sent. Turning the limit back on gives waiting requests a fresh window.
 3. Only the agent's own manager can answer this manager step (WFM and Admin cannot answer it for them). Manager approves: the usual rules then decide (minimum notice, allocation, automatic or manual mode), so the result is Approved, Pending (manual mode) or Rejected.
 4. Manager rejects, or does not answer before the deadline: the request is rejected and the slot goes back. Unanswered requests are rejected automatically within about 20 seconds of the deadline while anyone has the app open, and are also swept the next time anyone opens it.
 5. Short-notice dates and full days skip the manager step and follow the existing override flow.
 6. Agents tap the date on their calendar to follow the request. From there they can edit it (date or note) until the manager answers, and can cancel an awaiting, pending or approved request before its date. Managers and WFM can cancel approved time off. A cancelled request is kept for the record and its slot opens up again.
+
+## Manager passcodes: set-up and reset links
+
+- **WFM sends a link.** Settings > Manager sign-in > *Send set-up link* (or *Send reset link*) makes a one-time link such as `https://your-app.streamlit.app/?mgrsetup=...`. Copy it and send it to the manager by chat or email. It works once, for 48 hours, and making a new link cancels the old one.
+- **The manager opens it**, chooses a passcode (8+ characters, typed twice) and is signed in straight away. A used or expired link says so and asks them to get a new one.
+- **Forgot passcode?** On the manager sign-in screen this flags the manager for WFM: their row is highlighted and the Settings tab shows a count. WFM sends a reset link. The old passcode keeps working until the new one is set, so nobody is locked out by a reset they did not ask for.
+- **Change passcode.** A signed-in manager can change it from the button next to Sign out (current passcode required).
+- WFM can still type a passcode for a manager with *Type passcode*.
+- Only a hash of each link is stored (`managers` collection: `setup_hash`, `setup_expires`, `reset_requested`), like the passcodes. There is no email sending, so links are shared by WFM. The link address comes from the app itself; if a link ever shows a wrong address, replace the part before `?mgrsetup=` with your app address.
 
 ## Notifications for agents
 
