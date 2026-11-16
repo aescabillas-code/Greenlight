@@ -972,26 +972,29 @@ table.dtable,table.lft{width:100%;border-collapse:separate;border-spacing:0;font
 .day.open.soon{background-color:var(--accent-soft)}
 .cal .day{position:relative}
 .cal .day.soon:not(.past)::after{content:"";position:absolute;top:3px;right:4px;width:6px;height:6px;border-radius:50%;background:var(--warn)}
-#modalRoot .glass:has(.cal){max-height:calc(100dvh - 20px);overflow-y:auto;padding:14px 18px 14px;gap:8px}
-#modalRoot .glass:has(.cal) .mhead .ava{width:30px;height:30px;font-size:12px}
-#modalRoot .glass:has(.cal) .facts{display:flex;flex-wrap:wrap;gap:5px}
-#modalRoot .glass:has(.cal) .facts>div{display:flex;align-items:baseline;gap:5px;padding:3px 9px;border-radius:999px;font-size:12px;line-height:1.3}
-#modalRoot .glass:has(.cal) .facts>div{flex-direction:row!important}
-#modalRoot .glass:has(.cal) .facts>div>*{display:inline!important;margin:0!important}
-#modalRoot .glass:has(.cal) .facts>div>*:first-child{font-size:9.5px}
-#modalRoot .glass:has(.cal) p.small{font-size:12px;line-height:1.4;margin:0}
-#modalRoot .glass:has(.cal) .bar{margin:0;gap:8px}
-#modalRoot .glass:has(.cal) .cal{gap:4px}
-#modalRoot .glass:has(.cal) .dow{font-size:10px}
-#modalRoot .glass:has(.cal) .cal .day{min-height:0;height:30px;padding:2px 5px;font-size:12px}
-#modalRoot .glass:has(.cal) .cal .day .l{font-size:9.5px}
-#modalRoot .glass:has(.cal) .legend{gap:4px 12px;font-size:11px}
-#modalRoot .glass:has(.cal) .ovask{padding:8px 10px;gap:6px}
-#modalRoot .glass:has(.cal) .ovf textarea{min-height:34px;padding-block:6px}
-#modalRoot .glass:has(.cal) .ovask p{margin:0;line-height:1.4}
-@media (max-width:640px){#modalRoot .glass:has(.cal) .facts>div:nth-child(n+4){display:none}}
+#modalRoot .glass:has(.cal):not(:has(.rcal)){max-height:calc(100dvh - 20px);overflow-y:auto;padding:14px 18px 14px;gap:8px}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .mhead .ava{width:30px;height:30px;font-size:12px}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .facts{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .facts>div{display:grid!important;grid-template-columns:82px minmax(0,1fr);align-items:center;gap:8px;padding:6px 12px!important;margin:0!important;border-radius:0!important;border:0!important;box-shadow:none!important;background:transparent!important;border-bottom:1px solid color-mix(in srgb,var(--line) 70%,transparent)!important;font-size:12.5px;line-height:1.35;min-width:0}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .facts>div:nth-child(odd){border-right:1px solid color-mix(in srgb,var(--line) 70%,transparent)!important}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .facts>div:nth-child(4n+1),#modalRoot .glass:has(.cal):not(:has(.rcal)) .facts>div:nth-child(4n+2){background:color-mix(in srgb,var(--accent) 5%,var(--surface))!important}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .facts>div>*{display:block!important;margin:0!important;min-width:0}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .facts>div>*:first-child{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .facts>div>*:last-child{font-weight:600;color:var(--fg);overflow-wrap:anywhere}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .facts>div:last-child:nth-child(odd){grid-column:1/-1;border-right:0!important}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) p.small{font-size:12px;line-height:1.4;margin:0}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .bar{margin:0;gap:8px}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .cal{gap:4px}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .dow{font-size:10px}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .cal .day{min-height:0;height:30px;padding:2px 5px;font-size:12px}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .cal .day .l{font-size:9.5px}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .legend{gap:4px 12px;font-size:11px}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .ovask{padding:8px 10px;gap:6px}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .ovf textarea{min-height:34px;padding-block:6px}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .ovask p{margin:0;line-height:1.4}
+@media (max-width:640px){#modalRoot .glass:has(.cal):not(:has(.rcal)) .facts{grid-template-columns:minmax(0,1fr)}#modalRoot .glass:has(.cal):not(:has(.rcal)) .facts>div{border-right:0!important}#modalRoot .glass:has(.cal):not(:has(.rcal)) .facts>div{grid-template-columns:86px minmax(0,1fr)}}
 .legend i.lg{width:14px;height:14px;border-radius:4px;display:inline-block;background-color:var(--accent-soft)}
-#modalRoot .glass:has(.cal) .pickchips,#modalRoot .glass:has(.cal) .warn{margin:0}
+#modalRoot .glass:has(.cal):not(:has(.rcal)) .pickchips,#modalRoot .glass:has(.cal):not(:has(.rcal)) .warn{margin:0}
 .cal .day.sel,.cal .day.sel.open,.cal .day.sel.soon{background:var(--pick-bg)!important;background-image:none!important;border-color:var(--pick-bg);color:var(--pick-fg)}
 .cal .day.sel .l{color:var(--pick-fg)!important}
 .cal .day.sel.soon::after{background:var(--pick-fg)}
