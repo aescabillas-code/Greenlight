@@ -46,3 +46,38 @@ def evaluate(today: str, requested: str, min_notice_days: int, mode: str, alloca
     if allocation > 0:
         return "rejected", "No allocation left for this day", False
     return "rejected", "No allocation set for this day", False
+
+
+# ---------------------------------------------------------------- leave types
+
+LEAVE_TYPES = {"pto": "PTO", "wellness": "Wellness", "sick": "Sick Leave", "emergency": "Emergency Leave"}
+PLANNED = ("pto", "wellness")      # use the WFM allocation, need the minimum notice
+UNPLANNED = ("sick", "emergency")  # no notice, no slot: approved by the system once the manager approves
+WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def leave_type(value) -> str:
+    return value if value in LEAVE_TYPES else "pto"
+
+
+def wellness_month(settings: dict, iso: str) -> bool:
+    """Is this date inside the WFM wellness months (May to August unless WFM changes it)? Ranges may wrap the year."""
+    if not settings.get("wellness_on", True):
+        return False
+    month, start, end = int(iso[5:7]), int(settings.get("wellness_from", 5)), int(settings.get("wellness_to", 8))
+    return start <= month <= end if start <= end else (month >= start or month <= end)
+
+
+def wellness_day(settings: dict, iso: str) -> bool:
+    """A date that can be booked as Wellness: inside the wellness months and not on a locked weekday."""
+    return wellness_month(settings, iso) and WEEKDAYS[date.fromisoformat(iso).weekday()] not in (settings.get("wellness_days_off") or [])
+
+
+def pool_slots(total: int, settings: dict, iso: str, kind: str) -> int:
+    """In wellness months each day's leave slots are split: wellness_share % (rounded down) for Wellness,
+    the rest for PTO. On a day blocked for Wellness, and outside those months, every slot is PTO."""
+    total = max(0, int(total))
+    if not wellness_day(settings, iso):
+        return 0 if kind == "wellness" else total
+    wellness = total * int(settings.get("wellness_share", 50)) // 100
+    return wellness if kind == "wellness" else total - wellness

@@ -66,10 +66,10 @@ Override requests: when a picked date is inside the notice window or has no slot
 
 **Extract report** downloads an Excel file that matches the screen it was opened from: the PTO Dashboard (WFM and managers; a manager's report follows the My team / All requests switch) or Reports (Admin). It covers the month, department and region chosen at the top. It is built in the browser, so it needs no extra server setup. Tabs:
 
-- **Dashboard**: WFM and Admin get headcount after PTO first (average headcount after PTO, coverage kept, lowest day, days below required), then approved, rejected and pending; managers get approved, rejected, pending and busiest day. Then requests by every status (approved, rejected, waiting for manager approval, waiting for override approval, pending review, cancelled), requests by region, override requests by type and outcome (WFM and Admin), and charts: daily headcount after PTO (WFM and Admin), approved and rejected per day, requests by status, requests by region.
+- **Dashboard**: WFM and Admin get headcount after leave first (average headcount after leave, coverage kept, lowest day, days below required), then approved, rejected and pending; managers get approved, rejected, pending and busiest day. Then requests by every status (approved, rejected, waiting for manager approval, waiting for override approval, pending review, cancelled), requests by region, override requests by type and outcome (WFM and Admin), and charts: daily headcount after leave (WFM and Admin), approved and rejected per day, requests by status, requests by region.
 - **Requests**: one row per request with where it stands (including the two waiting steps), the manager reply deadline, filters and a frozen header. WFM and Admin also get the override request columns.
-- **Daily**: slots, approved, rejected and waiting for each day, with formulas for slots left and totals. WFM and Admin also get scheduled, headcount after PTO (a formula) and required.
-- **Coverage** (WFM and Admin): every scheduled day, lowest coverage first, with scheduled, on PTO, waiting, headcount after PTO, required, coverage % and an OK / Tight / Below required status.
+- **Daily**: slots, approved, rejected and waiting for each day, with formulas for slots left and totals. WFM and Admin also get scheduled, headcount after leave (a formula) and required.
+- **Coverage** (WFM and Admin): every scheduled day, lowest coverage first, with scheduled, on PTO, waiting, headcount after leave, required, coverage % and an OK / Tight / Below required status.
 - **By team**: each department and region, with slots used as a percentage
 
 ## Data in MongoDB
@@ -97,8 +97,8 @@ One app address for everyone. People sign in only when their role needs it.
 |---|---|---|
 | Agent | No passcode. Search your name once; the device remembers you until Sign out. | PTO Dashboard: Submit PTO request circle and request history. Tap a requested date to see its timeline (Submitted, Manager approval, Automated WFM review), edit it while the manager has not answered, or cancel it before the date. Plus the dashboard. |
 | Manager | Pick Manager, choose your profile circle, enter your passcode. Stays signed in. | PTO Dashboard (own team by default, All requests on a switch), plus **Approvals**: only their own team's requests, with bulk approve and reject, and a list of upcoming approved time off (only the agent can cancel a request). |
-| Admin | Pick Admin, enter `OVERRIDE_PASSWORD`. Stays signed in. | Override requests: every override request from every agent goes here, to approve or reject one by one or in bulk. Settings: how many hours before the requested date an unreviewed override request is rejected automatically (24 by default, 1 to 336). Reports: daily headcount after PTO (chart and tables), lowest-coverage days, requests by status, PTO days by team and override outcomes, filtered by month, department and region. |
-| WFM | Pick WFM, enter the WFM passcode. Stays signed in. | PTO Dashboard (headcount after PTO and coverage charts, requests by status, PTO by team, overrides, people off each day, and the All requests table with every status, where selecting a row shows its details; requests cannot be edited or deleted there), Pending (only while Manual review is on), Settings, roster, allocation, manager passcodes. |
+| Admin | Pick Admin, enter `OVERRIDE_PASSWORD`. Stays signed in. | Override requests: every override request from every agent goes here, to approve or reject one by one or in bulk. Settings: how many hours before the requested date an unreviewed override request is rejected automatically (24 by default, 1 to 336). Reports: daily headcount after leave (chart and tables), lowest-coverage days, requests by status, PTO days by team and override outcomes, filtered by month, department and region. |
+| WFM | Pick WFM, enter the WFM passcode. Stays signed in. | PTO Dashboard (headcount after leave and coverage charts, requests by status, PTO by team, overrides, people off each day, and the All requests table with every status, where selecting a row shows its details; requests cannot be edited or deleted there), Pending (only while Manual review is on), Settings, roster, allocation, manager passcodes. |
 | Developer | Same sign-in with `DEV_PASSWORD`. | Same as WFM, and the key keeps working if the admin passcode is lost. The header shows Developer. |
 
 Manager passcodes are set by WFM in Settings > Manager sign-in (hashed in the `managers` collection). Names come from the Current Manager column of the roster.
@@ -111,6 +111,34 @@ Manager passcodes are set by WFM in Settings > Manager sign-in (hashed in the `m
 4. Manager rejects, or does not answer before the deadline: the request is rejected and the slot goes back. Unanswered requests are rejected automatically within about 20 seconds of the deadline while anyone has the app open, and are also swept the next time anyone opens it.
 5. Short-notice dates and full days skip the manager step and follow the existing override flow.
 6. Agents tap the date on their calendar to follow the request. From there they can edit it (date or note) until the manager answers, and can cancel an awaiting, pending or approved request before its date. Managers and WFM can cancel approved time off. A cancelled request is kept for the record and its slot opens up again.
+
+## Attachments, reasons and the All requests tab
+
+- **Sick and Emergency Leave** ask for a reason or comment (required) and can carry up to 3 files of any type (5 MB each): images, PDFs, Word or Excel files, text and more. **Override requests** can carry files too; they are linked only to the dates that need the override.
+- **Who can open files:** only signed-in staff: the agent's own manager, WFM and the Admin. Agents see the file names they sent but cannot open files from the agent screen, because the agent screen has no sign-in and files are often medical.
+- **Viewing:** opening a request shows its files inside the pop-up: images, video and audio directly; PDFs, Word (.docx) and Excel files through viewers loaded from cdnjs.cloudflare.com; text files as text. Other types show a Download button.
+- **Storage:** each file is stored once in the `attachments` collection (base64, with the ids of its requests); requests only keep the name, type and size. A delivered file is not re-sent on refresh.
+- **Manager Approvals** has two tabs: Planned leave (PTO, Wellness) and Unplanned leave (Sick, Emergency). The manager can approve or reject from the request pop-up.
+- **WFM All requests tab:** view only, every planned and unplanned request by month, week or date, with approval-status chips and filters for leave type, department, region and name. **Extract report** saves exactly what is listed as a formatted Excel file (a Summary sheet with counts by status and leave type, and a Requests sheet with date, agent, manager, team, leave type, category, status, reason or comment, attachment names and when it was sent).
+- **Headcount after leave** subtracts everyone off that day: approved leave of any type, plus Sick and Emergency Leave still waiting for the manager.
+
+## Leave types: PTO, Wellness, Sick Leave, Emergency Leave
+
+Agents tap **Submit leave request** and choose the type of leave in the request pop-up.
+
+| Type | Category | Rules |
+|---|---|---|
+| PTO | Planned | Minimum notice and the PTO share of the day's slots. Manager first, then the system decides. |
+| Wellness | Planned | Only in the Wellness months (May to August by default), not on locked weekdays, up to 4 a year and 1 a month per agent (approved, waiting and open-override requests count). Uses the Wellness share of the day's slots. Manager first, then the system decides. |
+| Sick Leave | Unplanned | No notice and no slot. Manager approves, then the system approves it automatically. |
+| Emergency Leave | Unplanned | Same as Sick Leave. |
+
+- **Wellness only appears in the list** when the agent could book it: a Wellness day is coming up within about 14 months and they have allowance left for that year. Their Wellness balance shows under their name.
+- **Settings > Wellness** (WFM): on/off, months (a range can wrap the year, e.g. November to February), days blocked for Wellness (any days of the week, weekends included, as many as needed), Wellness days per agent per year and per month (`wellness_per_month`, default 1), and the share of each day's slots for Wellness.
+- **Only Wellness requests count toward the yearly Wellness limit.** PTO, Sick and Emergency Leave never use it up.
+- **Slot split:** in Wellness months each day's slots from PTO allocation are split. Wellness gets its share rounded down, PTO gets the rest (4 slots at 50% = 2 PTO + 2 Wellness; 3 slots = 2 PTO + 1 Wellness). On a day blocked for Wellness, all of that day's slots go to PTO. The allocation calendar shows the split under each day (P · W), or *All PTO* on blocked days. Outside those months every slot is PTO.
+- **Reports:** every table and the Excel report show the leave type and its category (Planned / Unplanned). The dashboards have a Leave type filter and a *Leave by type* chart (click a type to see the requests). Headcount after leave counts every approved leave type; slots left only count planned leave.
+- Stored on each request as `type` (`pto`, `wellness`, `sick`, `emergency`); older requests without it count as PTO. Settings fields: `wellness_on`, `wellness_from`, `wellness_to`, `wellness_days_off`, `wellness_per_year`, `wellness_share`.
 
 ## Manager passcodes: set-up and reset links
 

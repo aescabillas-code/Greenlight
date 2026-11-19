@@ -32,7 +32,8 @@ from bson.errors import InvalidId
 from pymongo import ASCENDING, MongoClient, UpdateOne
 from pymongo.errors import DuplicateKeyError
 
-from greenlight_rules import evaluate, resolve_allocation
+from greenlight_rules import (LEAVE_TYPES, PLANNED, UNPLANNED, WEEKDAYS, evaluate, leave_type, pool_slots,
+                              resolve_allocation, wellness_day, wellness_month)
 
 # Browser tab: the Greenlight logo, then the name in script letters (a tab title cannot use a web font,
 # so it uses the Unicode script alphabet, which every browser shows as cursive).
@@ -78,6 +79,8 @@ MGR_MAX_DEFAULT = 72        # the manager approval window in hours (WFM can chan
 OVR_REJECT_DEFAULT = 24     # unreviewed override requests close this many hours before the requested date (Admin Settings)
 SESSION_DAYS = 30           # how long a sign-in lasts until the person signs out
 HELD = ("approved", "awaiting")  # statuses that use up a slot
+WELLNESS_DEFAULTS = {"wellness_on": True, "wellness_from": 5, "wellness_to": 8, "wellness_days_off": [],
+                     "wellness_per_year": 4, "wellness_share": 50}
 ROSTER_FIELDS = ("name", "manager", "region", "department", "work_days", "shift")
 
 
@@ -96,6 +99,7 @@ def get_db():
     db.requests.create_index([("status", ASCENDING), ("mgr_deadline", ASCENDING)])
     db.sessions.create_index("expires", expireAfterSeconds=0)
     db.locks.create_index("expires", expireAfterSeconds=0)  # clears locks left behind by a crashed run
+    db.attachments.create_index([("request_ids", ASCENDING)])
     db.allocations.create_index([("kind", ASCENDING), ("department", ASCENDING), ("region", ASCENDING), ("key", ASCENDING)], unique=True)
     return db
 
@@ -124,6 +128,13 @@ def get_settings(db) -> dict:
         "mgr_max_hours": int(cfg.get("mgr_max_hours", MGR_MAX_DEFAULT)),
         "mgr_window_off": bool(cfg.get("mgr_window_off", False)),
         "ovr_reject_hours": int(cfg.get("ovr_reject_hours", OVR_REJECT_DEFAULT)),
+        "wellness_on": bool(cfg.get("wellness_on", True)),
+        "wellness_from": int(cfg.get("wellness_from", 5)),
+        "wellness_to": int(cfg.get("wellness_to", 8)),
+        "wellness_days_off": [d for d in (cfg.get("wellness_days_off") or []) if d in WEEKDAYS],
+        "wellness_per_year": int(cfg.get("wellness_per_year", 4)),
+        "wellness_per_month": int(cfg.get("wellness_per_month", 1)),
+        "wellness_share": int(cfg.get("wellness_share", 50)),
     }
 
 
@@ -207,6 +218,7 @@ def serialize_request(doc: dict) -> dict:
         "region": doc.get("region", ""),
         "date": doc.get("date", ""),
         "status": doc.get("status", "pending"),
+        "type": leave_type(doc.get("type")),
         "reason": doc.get("reason", ""),
         "short_notice": bool(doc.get("short_notice", False)),
         "override_request": doc.get("override_request", ""),
@@ -215,6 +227,8 @@ def serialize_request(doc: dict) -> dict:
         "decided_by": doc.get("decided_by", "auto"),
         "override_reason": doc.get("override_reason", ""),
         "note": doc.get("note", ""),
+        "attachments": [{"id": str(a.get("id", "")), "name": a.get("name", ""), "type": a.get("type", ""), "size": int(a.get("size", 0))}
+                        for a in (doc.get("attachments") or [])][:5],
         "submitted_at": _iso(stamp),
         "batch_id": doc.get("batch_id", ""),
         "mgr_deadline": _iso(doc.get("mgr_deadline")),
@@ -496,26 +510,83 @@ def day_lock(db, department: str, region: str, iso: str, wait: float = 15.0):
         db.locks.delete_one({"_id": key, "owner": me})
 
 
-def team_used(db, team: dict, iso: str, exclude=None, before=None) -> int:
-    """Slots in use on a day: approved requests plus requests held while they wait for a manager."""
-    query = {**team, "date": iso, "status": {"$in": list(HELD)}}
+def pool_filter(kind: str) -> dict:
+    """Which requests share a slot pool: Wellness has its own; PTO (and old requests with no type) the other.
+    Sick and Emergency leave never take a slot."""
+    return {"type": "wellness"} if kind == "wellness" else {"type": {"$nin": ["wellness", "sick", "emergency"]}}
+
+
+def team_used(db, team: dict, iso: str, exclude=None, before=None, kind: str = "pto") -> int:
+    """Slots in use on a day in one pool (PTO or Wellness): approved requests plus requests held while they wait for a manager."""
+    pool = pool_filter(kind)
+    query = {**team, **pool, "date": iso, "status": {"$in": list(HELD)}}
     if exclude is not None:
         query["_id"] = {"$ne": exclude}
     count = db.requests.count_documents(query)
     if before is not None:  # for a held request, only earlier holders keep priority over it
-        count = db.requests.count_documents({**team, "date": iso, "status": "approved"}) + \
-            db.requests.count_documents({**team, "date": iso, "status": "awaiting", "_id": {"$lt": before}})
+        count = db.requests.count_documents({**team, **pool, "date": iso, "status": "approved"}) + \
+            db.requests.count_documents({**team, **pool, "date": iso, "status": "awaiting", "_id": {"$lt": before}})
     return count
 
 
-def submit_one(db, agent: dict, team: dict, iso: str, settings: dict, today: str, now: datetime, ask: str, batch: str) -> dict:
+def pool_allocation(db, team: dict, iso: str, settings: dict, kind: str) -> int:
+    """The slots for one pool on a day: the WFM allocation, split between PTO and Wellness in wellness months."""
+    return pool_slots(allocation_for(db, team["department"], team["region"], iso), settings, iso, kind)
+
+
+def wellness_taken(db, employee_id: str, year: str, exclude=None) -> int:
+    """Wellness days an agent has used or has on the way this year (approved, waiting, or waiting on an override)."""
+    query = {"employee_id": employee_id, "type": "wellness", "date": {"$gte": f"{year}-01-01", "$lte": f"{year}-12-31"},
+             "$or": [{"status": {"$in": ["approved", "awaiting", "pending"]}}, {"override_status": "open"}]}
+    if exclude is not None:
+        query["_id"] = {"$ne": exclude}
+    return db.requests.count_documents(query)
+
+
+def wellness_taken_month(db, employee_id: str, month: str, exclude=None) -> int:
+    """Wellness days an agent has used or has on the way in one month (YYYY-MM)."""
+    query = {"employee_id": employee_id, "type": "wellness", "date": {"$gte": f"{month}-01", "$lte": f"{month}-31"},
+             "$or": [{"status": {"$in": ["approved", "awaiting", "pending"]}}, {"override_status": "open"}]}
+    if exclude is not None:
+        query["_id"] = {"$ne": exclude}
+    return db.requests.count_documents(query)
+
+
+def type_problem(db, settings: dict, kind: str, iso: str, employee_id: str, exclude=None):
+    """Rules that depend on the leave type alone. Returns a reason the date cannot be booked, or None."""
+    if kind == "wellness":
+        if not wellness_month(settings, iso):
+            return "Wellness is not available in this month"
+        if not wellness_day(settings, iso):
+            return "Wellness is not available on " + date.fromisoformat(iso).strftime("%A") + "s"
+        if wellness_taken(db, employee_id, iso[:4], exclude) >= settings["wellness_per_year"]:
+            return f"No Wellness days left for {iso[:4]} ({settings['wellness_per_year']} a year)"
+        per_month = settings.get("wellness_per_month", 1)
+        if wellness_taken_month(db, employee_id, iso[:7], exclude) >= per_month:
+            return (f"Only {per_month} Wellness day{'s' if per_month != 1 else ''} a month: "
+                    f"{date.fromisoformat(iso).strftime('%B %Y')} already has {'one' if per_month == 1 else 'the limit'}")
+    return None
+
+
+def submit_one(db, agent: dict, team: dict, iso: str, settings: dict, today: str, now: datetime, ask: str, batch: str,
+               kind: str = "pto") -> dict:
     """Check and save one date. Runs while holding the day lock, so the slot count cannot change underneath it."""
     if db.requests.find_one({"employee_id": agent["employee_id"], "date": iso, "status": {"$nin": ["rejected", "cancelled"]}}):
         return {"date": iso, "status": "skipped", "reason": "Already requested for this date"}
-    allocation = allocation_for(db, team["department"], team["region"], iso)
-    used = team_used(db, team, iso)
-    status, reason, short = evaluate(today, iso, settings["min_notice_days"], settings["approval_mode"], allocation, used)
-    otype = "" if not ask or status == "approved" else "notice" if short else "allocation" if used >= allocation else ""
+    problem = type_problem(db, settings, kind, iso, agent["employee_id"])
+    if problem:
+        return {"date": iso, "status": "skipped", "reason": problem}
+    if kind in UNPLANNED:
+        # Sick and Emergency leave: no notice and no slot. The manager approves, then the system approves it.
+        if iso < today:
+            return {"date": iso, "status": "skipped", "reason": "Date has already passed"}
+        allocation, used = 0, 0
+        status, reason, short, otype = "approved", "", False, ""
+    else:
+        allocation = pool_allocation(db, team, iso, settings, kind)
+        used = team_used(db, team, iso, kind=kind)
+        status, reason, short = evaluate(today, iso, settings["min_notice_days"], settings["approval_mode"], allocation, used)
+        otype = "" if not ask or status == "approved" else "notice" if short else "allocation" if used >= allocation else ""
     deadline = None
     if status in ("approved", "pending") and not short:
         # Layer one: the agent's manager answers first. The slot is held meanwhile.
@@ -523,13 +594,67 @@ def submit_one(db, agent: dict, team: dict, iso: str, settings: dict, today: str
         status, reason = "awaiting", "Waiting for manager approval"
     db.requests.insert_one({
         "employee_id": agent["employee_id"], "name": agent["name"], "manager": agent.get("manager", ""),
-        **team, "date": iso, "status": status, "reason": reason, "short_notice": short, "decided_by": "auto",
+        **team, "date": iso, "type": kind, "status": status, "reason": reason, "short_notice": short, "decided_by": "auto",
         "override_request": ask if otype else "", "override_status": "open" if otype else "", "override_type": otype,
         "override_reason": "", "note": "", "submitted_at": now, "batch_id": batch,
         **({"mgr_deadline": deadline} if deadline else {}),
     })
-    return {"date": iso, "status": status, "reason": reason, "override_requested": bool(otype),
+    return {"date": iso, "type": kind, "status": status, "reason": reason, "override_requested": bool(otype),
             "mgr_deadline": _iso(deadline) if deadline else ""}
+
+
+MAX_FILES = 3
+MAX_FILE_BYTES = 5 * 1024 * 1024   # 5 MB per file
+
+
+def read_files(payload: dict):
+    """Files sent with a request (any type): [{name, type, data (base64)}]. Returns (files, error)."""
+    files = []
+    for f in (payload.get("attachments") or [])[:MAX_FILES + 1]:
+        if not isinstance(f, dict):
+            continue
+        data = str(f.get("data", ""))
+        if "," in data[:100] and data.startswith("data:"):
+            data = data.split(",", 1)[1]
+        size = len(data) * 3 // 4 - data[-2:].count("=")
+        if not data or not re.fullmatch(r"[A-Za-z0-9+/=\s]+", data[:4000]):
+            return [], "One of the files could not be read. Attach it again."
+        if size > MAX_FILE_BYTES:
+            return [], f"{clean(f.get('name'), 80) or 'A file'} is larger than 5 MB."
+        files.append({"name": clean(f.get("name"), 120) or "attachment", "type": clean(f.get("type"), 100) or "application/octet-stream",
+                      "size": size, "data": data})
+    if len(files) > MAX_FILES:
+        return [], f"Attach up to {MAX_FILES} files."
+    return files, ""
+
+
+def save_files(db, files: list, request_ids: list, now: datetime) -> list:
+    """Each file is stored once, in its own collection, and linked to every request it belongs to.
+    Requests only keep the name, type and size, so the app stays fast."""
+    meta = []
+    for f in files:
+        aid = db.attachments.insert_one({**f, "request_ids": request_ids, "uploaded_at": now}).inserted_id
+        meta.append({"id": str(aid), "name": f["name"], "type": f["type"], "size": f["size"]})
+    if meta and request_ids:
+        db.requests.update_many({"_id": {"$in": request_ids}}, {"$set": {"attachments": meta}})
+    return meta
+
+
+def do_get_attachment(db, payload: dict) -> dict:
+    """The content of one attachment, for signed-in staff only: the agent's manager, WFM and the Admin.
+    Agents have no sign-in, so files (often medical) are never opened from the agent screen."""
+    try:
+        doc = db.attachments.find_one({"_id": ObjectId(str(payload.get("id", "")))})
+    except (InvalidId, TypeError):
+        doc = None
+    if not doc:
+        return {"error": "That file is no longer available."}
+    reqs = list(db.requests.find({"_id": {"$in": doc.get("request_ids") or []}}, {"employee_id": 1, "manager": 1}))
+    ok = bool(st.session_state.get("is_admin") or st.session_state.get("is_override") or st.session_state.get("is_dev"))
+    ok = ok or any(st.session_state.get("manager") and r.get("manager") == st.session_state.get("manager") for r in reqs)
+    if not ok:
+        return {"error": "You cannot open this file."}
+    return {"ok": True, "id": str(doc["_id"]), "name": doc.get("name", ""), "type": doc.get("type", ""), "size": doc.get("size", 0), "data": doc.get("data", "")}
 
 
 def do_submit(db, payload: dict) -> dict:
@@ -539,27 +664,55 @@ def do_submit(db, payload: dict) -> dict:
     dates = sorted({d for d in payload.get("dates", []) if isinstance(d, str) and ISO_DATE.match(d)})[:62]
     if not dates:
         return {"error": "Pick at least one date."}
+    files, problem = read_files(payload)
+    if problem:
+        return {"error": problem}
+    comment = clean(payload.get("comment"), 1000)
+    if leave_type(payload.get("type")) in UNPLANNED and not comment:
+        return {"error": "Add a reason or comment for this leave."}
 
     settings, today, batch, results = get_settings(db), today_iso(db), uuid.uuid4().hex, []
     now = datetime.now(timezone.utc)
     ask = clean(payload.get("override_request"), 500)  # the agent's reason for an exception (short notice or no slot)
     per_date = payload.get("override_reasons") if isinstance(payload.get("override_reasons"), dict) else {}
     team = {"department": agent["department"], "region": agent["region"]}
+    kind = leave_type(payload.get("type"))
+    if kind in UNPLANNED:
+        ask, per_date = "", {}  # unplanned leave never needs an override
     for iso in dates:
         reason_for_date = clean(per_date.get(iso), 500) or ask  # each date that needs an override has its own reason
         try:
             with day_lock(db, team["department"], team["region"], iso):
-                results.append(submit_one(db, agent, team, iso, settings, today, now, reason_for_date, batch))
+                if kind == "wellness":  # one agent's yearly Wellness count is checked one date at a time
+                    with day_lock(db, "wellness", agent["employee_id"], iso[:4]):
+                        results.append(submit_one(db, agent, team, iso, settings, today, now, reason_for_date, batch, kind))
+                else:
+                    results.append(submit_one(db, agent, team, iso, settings, today, now, reason_for_date, batch, kind))
         except TimeoutError as exc:
             results.append({"date": iso, "status": "skipped", "reason": str(exc)})
+    made = list(db.requests.find({"batch_id": batch}, {"_id": 1, "date": 1, "override_status": 1}))
+    if kind in UNPLANNED and made:
+        db.requests.update_many({"batch_id": batch}, {"$set": {"note": comment}})  # the reason or comment, shown to the manager
+    if files:
+        # Unplanned leave: the files go with every date. Planned leave: only with the dates that need an override.
+        owners = [m["_id"] for m in made if kind in UNPLANNED or m.get("override_status") == "open"]
+        meta = save_files(db, files, owners, now) if owners else []
+        got = {m["date"] for m in made if m["_id"] in owners}
+        for r in results:
+            if r["date"] in got:
+                r["attachments"] = len(meta)
     return {"results": results}
 
 
 def after_manager(db, doc: dict, settings: dict, today: str) -> tuple:
-    """The manager said yes: now the usual rules (notice, allocation, approval mode) decide."""
+    """The manager said yes: now the usual rules (notice, allocation, approval mode) decide.
+    Sick and Emergency leave are approved by the system straight away."""
+    kind = leave_type(doc.get("type"))
+    if kind in UNPLANNED:
+        return "approved", f"{LEAVE_TYPES[kind]} approved (unplanned leave)", False
     team = {"department": doc["department"], "region": doc["region"]}
-    allocation = allocation_for(db, team["department"], team["region"], doc["date"])
-    used = team_used(db, team, doc["date"], before=doc["_id"])
+    allocation = pool_allocation(db, team, doc["date"], settings, kind)
+    used = team_used(db, team, doc["date"], before=doc["_id"], kind=kind)
     status, reason, short = evaluate(today, doc["date"], settings["min_notice_days"], settings["approval_mode"], allocation, used)
     return status, reason, short
 
@@ -645,8 +798,14 @@ def do_edit_mine(db, payload: dict) -> dict:
     if iso != doc["date"]:
         if not ISO_DATE.match(iso):
             return {"error": "Pick a valid date."}
-        if (date.fromisoformat(iso) - date.fromisoformat(today)).days < settings["min_notice_days"]:
+        kind = leave_type(doc.get("type"))
+        if kind in UNPLANNED and iso < today:
+            return {"error": "That date has already passed."}
+        if kind in PLANNED and (date.fromisoformat(iso) - date.fromisoformat(today)).days < settings["min_notice_days"]:
             return {"error": "That date is inside the minimum notice. Cancel this request and submit a new one instead."}
+        problem = type_problem(db, settings, kind, iso, doc["employee_id"], exclude=doc["_id"])
+        if problem:
+            return {"error": problem + "."}
         if db.requests.find_one({"employee_id": doc["employee_id"], "date": iso, "status": {"$nin": ["rejected", "cancelled"]}, "_id": {"$ne": doc["_id"]}}):
             return {"error": "You already have a request for that date."}
         team = {"department": doc["department"], "region": doc["region"]}
@@ -656,7 +815,7 @@ def do_edit_mine(db, payload: dict) -> dict:
             change["mgr_deadline"] = deadline
         try:
             with day_lock(db, team["department"], team["region"], iso):
-                if team_used(db, team, iso, exclude=doc["_id"]) >= allocation_for(db, team["department"], team["region"], iso):
+                if kind in PLANNED and team_used(db, team, iso, exclude=doc["_id"], kind=kind) >= pool_allocation(db, team, iso, settings, kind):
                     return {"error": "That date has no open slot."}
                 done = db.requests.update_one({"_id": doc["_id"], "status": "awaiting"}, {"$set": change})
         except TimeoutError as exc:
@@ -725,6 +884,8 @@ def handle(db, event: dict) -> dict:
             db.sessions.delete_one({"_id": hashlib.sha256(token.encode()).hexdigest()})
         st.session_state.update({"is_admin": False, "is_dev": False, "is_override": False, "manager": "", "resume_for": "", "resume": "none"})
         return {"ok": True}
+    if kind == "getAttachment":
+        return do_get_attachment(db, payload)
     if kind == "submit":
         return do_submit(db, payload)
     if kind == "cancelRequest":
@@ -778,6 +939,16 @@ def handle(db, event: dict) -> dict:
         mx = max(1, min(168, int(payload.get("mgr_max_hours", MGR_MAX_DEFAULT))))
         window_off = bool(payload.get("mgr_window_off", False))
         change = {"approval_mode": mode, "min_notice_days": notice, "mgr_max_hours": mx, "mgr_window_off": window_off}
+        if "wellness_from" in payload:  # Wellness: months, locked weekdays, yearly allowance, share of each day's slots
+            change.update({
+                "wellness_on": bool(payload.get("wellness_on", True)),
+                "wellness_from": max(1, min(12, int(payload.get("wellness_from", 5)))),
+                "wellness_to": max(1, min(12, int(payload.get("wellness_to", 8)))),
+                "wellness_days_off": [d for d in WEEKDAYS if d in (payload.get("wellness_days_off") or [])],
+                "wellness_per_year": max(0, min(60, int(payload.get("wellness_per_year", 4)))),
+                "wellness_per_month": max(1, min(31, int(payload.get("wellness_per_month", 1)))),
+                "wellness_share": max(0, min(100, int(payload.get("wellness_share", 50)))),
+            })
         if payload.get("timezone"):
             if safe_zone(payload["timezone"]) != payload["timezone"]:
                 return {"error": "That timezone is not recognised."}
@@ -1030,6 +1201,9 @@ if isinstance(event, dict) and event.get("id") and event.get("id") != st.session
             st.session_state["resume"] = resume_session(database, token)
         except Exception:
             st.session_state["resume"] = "bad"
+    old = st.session_state.get("response") or {}
+    if isinstance(old.get("result"), dict) and old["result"].get("data"):
+        st.session_state["response"] = None  # a file was already delivered: do not send it again with every refresh
     if event.get("type") != "poll":
         try:
             result = handle(database, event)
