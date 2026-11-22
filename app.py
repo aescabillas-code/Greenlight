@@ -8,7 +8,6 @@ script applies it, then sends the fresh data back.
 Secrets (.streamlit/secrets.toml or the Streamlit Cloud secrets box):
     MONGODB_URI    = "mongodb+srv://user:pass@cluster.mongodb.net"
     ADMIN_PASSWORD = "choose-a-strong-passcode"   # first passcode; admins can change it in Settings
-    OVERRIDE_PASSWORD = "choose-another-passcode"  # the Admin role, which decides override requests
     DEV_PASSWORD   = "long-random-developer-key"  # optional; always signs in, even after the admin passcode changes
     MONGODB_DB     = "greenlight"      # optional
 """
@@ -73,10 +72,10 @@ ISO_MONTH = re.compile(r"^\d{4}-\d{2}$")
 ADMIN_ACTIONS = {
     "saveSettings", "setDefault", "setDefaults", "setRequired", "changePassword", "setOverride", "clearOverrides", "uploadRoster",
 }
-OVERRIDE_ACTIONS = {"overrideRequest", "declineOverride", "bulkOverride", "saveOvrSettings"}  # decided by the Admin role (or the developer key)
+OVERRIDE_ACTIONS = {"overrideRequest", "declineOverride", "bulkOverride", "saveOvrSettings"}  # decided by WFM (or the developer key)
 MANAGER_ACTIONS = {"mgrDecide", "mgrBulk"}
 MGR_MAX_DEFAULT = 72        # the manager approval window in hours (WFM can change it in Settings)
-OVR_REJECT_DEFAULT = 24     # unreviewed override requests close this many hours before the requested date (Admin Settings)
+OVR_REJECT_DEFAULT = 24     # unreviewed override requests close this many hours before the requested date (WFM Settings)
 SESSION_DAYS = 30           # how long a sign-in lasts until the person signs out
 HELD = ("approved", "awaiting")  # statuses that use up a slot
 WELLNESS_DEFAULTS = {"wellness_on": True, "wellness_from": 5, "wellness_to": 8, "wellness_days_off": [],
@@ -134,6 +133,8 @@ def get_settings(db) -> dict:
         "wellness_days_off": [d for d in (cfg.get("wellness_days_off") or []) if d in WEEKDAYS],
         "wellness_per_year": int(cfg.get("wellness_per_year", 4)),
         "wellness_per_month": int(cfg.get("wellness_per_month", 1)),
+        "sick_on": bool(cfg.get("sick_on", True)),
+        "emergency_on": bool(cfg.get("emergency_on", True)),
         "wellness_share": int(cfg.get("wellness_share", 50)),
     }
 
@@ -421,9 +422,7 @@ def resume_session(db, token: str) -> str:
         st.session_state.update({"manager": doc["manager"], "is_admin": False, "is_dev": False, "is_override": False})
     elif doc.get("admin"):
         st.session_state.update({"is_admin": True, "is_dev": bool(doc.get("dev")), "manager": "", "is_override": False})
-    elif doc.get("override"):
-        st.session_state.update({"is_override": True, "is_admin": False, "is_dev": False, "manager": ""})
-    else:
+    else:  # includes old Admin-role sessions: that role was retired, so they sign in again as WFM
         return "bad"
     db.sessions.update_one({"_id": key}, {"$set": {"expires": datetime.now(timezone.utc) + timedelta(days=SESSION_DAYS)}})
     return "ok"
@@ -444,7 +443,9 @@ def do_login(db, payload: dict) -> dict:
             return {"error": "That passcode is not right."}
         st.session_state.update({"manager": name, "is_admin": False, "is_dev": False, "is_override": False, "login_tries": 0})
         return {"ok": True, "token": new_session(db, manager=name)}
-    if payload.get("role") == "ovadmin":
+    if payload.get("role") == "ovadmin":  # the separate Admin role was retired: WFM decides override requests
+        return {"error": "Override requests are now decided by WFM. Sign in as WFM."}
+    if False:
         if st.session_state.get("login_tries", 0) >= 8:
             return {"error": "Too many attempts. Reload the page and try again."}
         if not st.secrets.get("OVERRIDE_PASSWORD", "") and not st.secrets.get("DEV_PASSWORD", ""):
@@ -641,7 +642,7 @@ def save_files(db, files: list, request_ids: list, now: datetime) -> list:
 
 
 def do_get_attachment(db, payload: dict) -> dict:
-    """The content of one attachment, for signed-in staff only: the agent's manager, WFM and the Admin.
+    """The content of one attachment, for signed-in staff only: the agent's manager and WFM.
     Agents have no sign-in, so files (often medical) are never opened from the agent screen."""
     try:
         doc = db.attachments.find_one({"_id": ObjectId(str(payload.get("id", "")))})
@@ -668,7 +669,10 @@ def do_submit(db, payload: dict) -> dict:
     if problem:
         return {"error": problem}
     comment = clean(payload.get("comment"), 1000)
-    if leave_type(payload.get("type")) in UNPLANNED and not comment:
+    asked = leave_type(payload.get("type"))
+    if asked in UNPLANNED and not get_settings(db).get(asked + "_on", True):
+        return {"error": f"{LEAVE_TYPES[asked]} is turned off. Contact WFM."}
+    if asked in UNPLANNED and not comment:
         return {"error": "Add a reason or comment for this leave."}
 
     settings, today, batch, results = get_settings(db), today_iso(db), uuid.uuid4().hex, []
@@ -729,7 +733,7 @@ def do_manager_decide(db, ids: list, status: str, reason: str) -> dict:
         return {"error": "Only the agent's manager can answer the manager approval step."}
     settings, today, now = get_settings(db), today_iso(db), datetime.now(timezone.utc)
     who = "manager" if st.session_state.get("manager") else "admin"
-    by = st.session_state.get("manager") or "Admin"
+    by = st.session_state.get("manager") or "WFM"
     out = []
     for rid in ids:
         try:
@@ -911,19 +915,19 @@ def handle(db, event: dict) -> dict:
         return do_manager_change(db, payload)
     if kind == "setManagerPasscode":
         return do_set_manager_passcode(db, payload) if st.session_state.get("is_admin") else {"error": "Admin sign-in required."}
-    can_override = bool(st.session_state.get("is_override") or st.session_state.get("is_dev"))
+    can_override = bool(st.session_state.get("is_admin") or st.session_state.get("is_dev"))  # WFM decides overrides
     if kind == "decide":
-        # WFM answers ordinary requests; a request that came with an override request is the Admin's to decide.
+        # WFM answers ordinary requests and override requests.
         rid0 = request_id(payload)
         d0 = db.requests.find_one({"_id": rid0}) if rid0 else None
         if d0 and d0.get("override_status") == "open":
             if not can_override:
-                return {"error": "Override requests are decided by the Admin."}
+                return {"error": "Override requests are decided by WFM."}
         elif not st.session_state.get("is_admin"):
             return {"error": "Admin sign-in required."}
     elif kind in OVERRIDE_ACTIONS:
         if not can_override:
-            return {"error": "Only the Admin can decide override requests."}
+            return {"error": "Only WFM can decide override requests."}
         if kind == "saveOvrSettings":
             hours = max(1, min(336, int(payload.get("ovr_reject_hours", OVR_REJECT_DEFAULT))))
             db.settings.update_one({"_id": "config"}, {"$set": {"ovr_reject_hours": hours}}, upsert=True)
@@ -947,6 +951,8 @@ def handle(db, event: dict) -> dict:
                 "wellness_days_off": [d for d in WEEKDAYS if d in (payload.get("wellness_days_off") or [])],
                 "wellness_per_year": max(0, min(60, int(payload.get("wellness_per_year", 4)))),
                 "wellness_per_month": max(1, min(31, int(payload.get("wellness_per_month", 1)))),
+                "sick_on": bool(payload.get("sick_on", True)),
+                "emergency_on": bool(payload.get("emergency_on", True)),
                 "wellness_share": max(0, min(100, int(payload.get("wellness_share", 50)))),
             })
         if payload.get("timezone"):

@@ -33,7 +33,6 @@ Open the address Streamlit prints (usually http://localhost:8501). `greenlight_c
 ```toml
 MONGODB_URI = "mongodb+srv://USER:PASSWORD@YOUR-CLUSTER.mongodb.net/?retryWrites=true&w=majority"
 ADMIN_PASSWORD = "choose-a-strong-passcode"        # WFM role
-OVERRIDE_PASSWORD = "choose-another-passcode"       # Admin role (decides override requests)
 MONGODB_DB = "greenlight"      # optional
 ```
 
@@ -58,18 +57,18 @@ For each date, in this order:
 4. Automatic: approved if approved requests for that department, region and day are below the allocation. Otherwise it is recorded as rejected, so an admin can still override it.
 
 Allocation for a day is the day's own number if one was set; else, if a required headcount is set, the agents scheduled that day minus the required headcount (never below 0); if a **percent of headcount needed** is set instead, the agents scheduled that day minus that percent of them, rounded up (for example 10 scheduled and 70% needed leaves 3 slots; setting one replaces the other for the same months); else that month's default, else the every-month default, else 0.
-An Admin override (decided by the Admin role) approves a rejected request even when the day is full, and stores the reason.
+An override (decided by WFM) approves a rejected request even when the day is full, and stores the reason.
 
-Override requests: when a picked date is inside the notice window or has no slot left, the agent can select **Request override** and give a reason. In automatic mode the date is still rejected right away, but it is recorded with the reason. Every open override request goes to the admin **Override requests** tab, split into **Short notice** and **No allocation**, filtered by month and year. Admins can approve or reject one, select several and decide them together, or reject all shown. Approving asks for one reason, which is saved on each request.
+Override requests: when a picked date is inside the notice window or has no slot left, the agent can select **Request override** and give a reason. In automatic mode the date is still rejected right away, but it is recorded with the reason. Every open override request goes to the admin **Override requests** tab, split into **Short notice** and **No allocation**, filtered by month and year. WFM can approve or reject one, select several and decide them together, or reject all shown. Approving asks for one reason, which is saved on each request.
 
 ## PTO report
 
-**Extract report** downloads an Excel file that matches the screen it was opened from: the PTO Dashboard (WFM and managers; a manager's report follows the My team / All requests switch) or Reports (Admin). It covers the month, department and region chosen at the top. It is built in the browser, so it needs no extra server setup. Tabs:
+**Extract report** downloads an Excel file that matches the screen it was opened from: the PTO Dashboard (WFM and managers; a manager's report follows the My team / All requests switch) or the All requests tab (WFM). It covers the month, department and region chosen at the top. It is built in the browser, so it needs no extra server setup. Tabs:
 
-- **Dashboard**: WFM and Admin get headcount after leave first (average headcount after leave, coverage kept, lowest day, days below required), then approved, rejected and pending; managers get approved, rejected, pending and busiest day. Then requests by every status (approved, rejected, waiting for manager approval, waiting for override approval, pending review, cancelled), requests by region, override requests by type and outcome (WFM and Admin), and charts: daily headcount after leave (WFM and Admin), approved and rejected per day, requests by status, requests by region.
-- **Requests**: one row per request with where it stands (including the two waiting steps), the manager reply deadline, filters and a frozen header. WFM and Admin also get the override request columns.
-- **Daily**: slots, approved, rejected and waiting for each day, with formulas for slots left and totals. WFM and Admin also get scheduled, headcount after leave (a formula) and required.
-- **Coverage** (WFM and Admin): every scheduled day, lowest coverage first, with scheduled, on PTO, waiting, headcount after leave, required, coverage % and an OK / Tight / Below required status.
+- **Dashboard**: WFM gets headcount after leave first (average headcount after leave, coverage kept, lowest day, days below required), then approved, rejected and pending; managers get approved, rejected, pending and busiest day. Then requests by every status (approved, rejected, waiting for manager approval, waiting for override approval, pending review, cancelled), requests by region, override requests by type and outcome (WFM and Admin), and charts: daily headcount after leave (WFM and Admin), approved and rejected per day, requests by status, requests by region.
+- **Requests**: one row per request with where it stands (including the two waiting steps), the manager reply deadline, filters and a frozen header. WFM also gets the override request columns.
+- **Daily**: slots, approved, rejected and waiting for each day, with formulas for slots left and totals. WFM also gets scheduled, headcount after leave (a formula) and required.
+- **Coverage** (WFM): every scheduled day, lowest coverage first, with scheduled, on PTO, waiting, headcount after leave, required, coverage % and an OK / Tight / Below required status.
 - **By team**: each department and region, with slots used as a percentage
 
 ## Data in MongoDB
@@ -87,7 +86,7 @@ Override requests: when a picked date is inside the notice window or has no slot
 
 Every role has **Guide** as the first tab. The guide also opens after each sign in, with a **Get started** button that goes to the dashboard.
 
-The app opens on a landing page with four circles: **GSD** (agents), **Manager**, **WFM** and **Admin**. People sign in first (agents pick their name, Manager, WFM and Admin enter a passcode). Every time someone signs in, the role's short welcome guide is the first thing shown, with a Get started button that leads to their view. (Reloading while still signed in goes straight to the view.) Guide is always the first tab, so it can be reopened at any time. The guide shows one step per screen, with arrows on both sides (or the arrow keys) and dots to jump to a step. Click the Greenlight logo to return to the landing page. Every step of every guide (GSD, Manager, WFM and Admin) has a short animated demo recorded from the current app. When a role is picked, its circle moves to the centre and the others fade away. Manager opens a window of profile circles with the names from the roster's Current Manager column; pick yours, then enter the passcode. WFM asks for the WFM passcode and Admin for the Admin passcode (developers use their key in either). The GSD, Manager and WFM guides highlight the manager approval window (72 hours by default, set by WFM).
+The app opens on a landing page with three circles: **GSD** (agents), **Manager** and **WFM**. People sign in first (agents pick their name, Manager, WFM and Admin enter a passcode). Every time someone signs in, the role's short welcome guide is the first thing shown, with a Get started button that leads to their view. (Reloading while still signed in goes straight to the view.) Guide is always the first tab, so it can be reopened at any time. The guide shows one step per screen, with arrows on both sides (or the arrow keys) and dots to jump to a step. Click the Greenlight logo to return to the landing page. Every step of every guide (GSD, Manager, WFM and Admin) has a short animated demo recorded from the current app. When a role is picked, its circle moves to the centre and the others fade away. Manager opens a window of profile circles with the names from the roster's Current Manager column; pick yours, then enter the passcode. WFM asks for the WFM passcode and Admin for WFM passcode (developers use their key in either). The GSD, Manager and WFM guides highlight the manager approval window (72 hours by default, set by WFM).
 
 **Stay signed in.** Managers and WFM stay signed in on that browser until they press Sign out (a sign-in token is kept in the browser and checked against the `sessions` collection, for up to 30 days of use). Agents are remembered on their device too: the app opens straight to their calendar, and Sign out (or Not you?) forgets them. Changing the admin passcode signs out other admin devices.
 
@@ -97,7 +96,6 @@ One app address for everyone. People sign in only when their role needs it.
 |---|---|---|
 | Agent | No passcode. Search your name once; the device remembers you until Sign out. | PTO Dashboard: Submit PTO request circle and request history. Tap a requested date to see its timeline (Submitted, Manager approval, Automated WFM review), edit it while the manager has not answered, or cancel it before the date. Plus the dashboard. |
 | Manager | Pick Manager, choose your profile circle, enter your passcode. Stays signed in. | PTO Dashboard (own team by default, All requests on a switch), plus **Approvals**: only their own team's requests, with bulk approve and reject, and a list of upcoming approved time off (only the agent can cancel a request). |
-| Admin | Pick Admin, enter `OVERRIDE_PASSWORD`. Stays signed in. | Override requests: every override request from every agent goes here, to approve or reject one by one or in bulk. Settings: how many hours before the requested date an unreviewed override request is rejected automatically (24 by default, 1 to 336). Reports: daily headcount after leave (chart and tables), lowest-coverage days, requests by status, PTO days by team and override outcomes, filtered by month, department and region. |
 | WFM | Pick WFM, enter the WFM passcode. Stays signed in. | PTO Dashboard (headcount after leave and coverage charts, requests by status, PTO by team, overrides, people off each day, and the All requests table with every status, where selecting a row shows its details; requests cannot be edited or deleted there), Pending (only while Manual review is on), Settings, roster, allocation, manager passcodes. |
 | Developer | Same sign-in with `DEV_PASSWORD`. | Same as WFM, and the key keeps working if the admin passcode is lost. The header shows Developer. |
 
@@ -107,15 +105,22 @@ Manager passcodes are set by WFM in Settings > Manager sign-in (hashed in the `m
 
 1. The agent submits and a pop-up shows the journey: Submitted, Manager approval, Automated WFM review, with the manager's deadline. If the date has an open slot and enough time is left, the request is **Awaiting manager** and the slot is held, so nobody else can take it.
 2. The manager has one approval window, 72 hours by default, counted from when the request is sent. WFM can change it in Settings > Approval rules, next to the minimum notice (`mgr_max_hours`), or choose **No time limit** (`mgr_window_off`): requests still go to the manager first but wait for the answer, nothing is auto-rejected for silence, and no reminder is sent. Turning the limit back on gives waiting requests a fresh window.
-3. Only the agent's own manager can answer this manager step (WFM and Admin cannot answer it for them). Manager approves: the usual rules then decide (minimum notice, allocation, automatic or manual mode), so the result is Approved, Pending (manual mode) or Rejected.
+3. Only the agent's own manager can answer this manager step (WFM cannot answer it for them). Manager approves: the usual rules then decide (minimum notice, allocation, automatic or manual mode), so the result is Approved, Pending (manual mode) or Rejected.
 4. Manager rejects, or does not answer before the deadline: the request is rejected and the slot goes back. Unanswered requests are rejected automatically within about 20 seconds of the deadline while anyone has the app open, and are also swept the next time anyone opens it.
 5. Short-notice dates and full days skip the manager step and follow the existing override flow.
 6. Agents tap the date on their calendar to follow the request. From there they can edit it (date or note) until the manager answers, and can cancel an awaiting, pending or approved request before its date. Managers and WFM can cancel approved time off. A cancelled request is kept for the record and its slot opens up again.
 
+## WFM decides override requests (Admin role removed)
+
+- The separate **Admin** role is gone. WFM now has the **Override requests** tab and decides every override request (approve with a reason, or reject; several at once).
+- The automatic cut-off for unreviewed override requests is in **WFM Settings > Override requests** (24 hours before the date by default).
+- `OVERRIDE_PASSWORD` is no longer used and can be removed from the app secrets. Old Admin sign-ins on a device are signed out.
+- **WFM Settings > Sick and Emergency Leave** turns each type on or off. A type that is off does not show in the agent's leave request form, and the server refuses it. Requests already sent are kept.
+
 ## Attachments, reasons and the All requests tab
 
 - **Sick and Emergency Leave** ask for a reason or comment (required) and can carry up to 3 files of any type (5 MB each): images, PDFs, Word or Excel files, text and more. **Override requests** can carry files too; they are linked only to the dates that need the override.
-- **Who can open files:** only signed-in staff: the agent's own manager, WFM and the Admin. Agents see the file names they sent but cannot open files from the agent screen, because the agent screen has no sign-in and files are often medical.
+- **Who can open files:** only signed-in staff: the agent's own manager and WFM. Agents see the file names they sent but cannot open files from the agent screen, because the agent screen has no sign-in and files are often medical.
 - **Viewing:** opening a request shows its files inside the pop-up: images, video and audio directly; PDFs, Word (.docx) and Excel files through viewers loaded from cdnjs.cloudflare.com; text files as text. Other types show a Download button.
 - **Storage:** each file is stored once in the `attachments` collection (base64, with the ids of its requests); requests only keep the name, type and size. A delivered file is not re-sent on refresh.
 - **Manager Approvals** has two tabs: Planned leave (PTO, Wellness) and Unplanned leave (Sick, Emergency). The manager can approve or reject from the request pop-up.
@@ -155,14 +160,14 @@ Agents see a bell next to their name on the PTO Dashboard, with a count of new m
 
 - their manager has not answered a day before the approval window ends (the request is rejected automatically at the deadline);
 - a request was rejected because the manager did not answer in time;
-- the Admin approved or rejected their override request;
-- an override request was still not reviewed by the cut-off before the requested date (24 hours by default; the Admin sets it in Settings), so the system rejected it automatically (the message names when it was closed and says the date is denied).
+- WFM approved or rejected their override request;
+- an override request was still not reviewed by the cut-off before the requested date (24 hours by default; WFM sets it in Settings), so the system rejected it automatically (the message names when it was closed and says the date is denied).
 
 These checks run whenever anyone has the app open (the keep-awake job in `.github/workflows` keeps that frequent). Messages are stored on the request in a `notices` list.
 
 ## Override requests when submitting
 
-When an agent picks several dates and some need an override (short notice or no slot left), each of those dates gets its own required reason field, and the button becomes **Submit request and override request**. One click sends everything: the other dates go in as normal requests and only the override dates go to the Admin queue. Only the agent can cancel their own request.
+When an agent picks several dates and some need an override (short notice or no slot left), each of those dates gets its own required reason field, and the button becomes **Submit request and override request**. One click sends everything: the other dates go in as normal requests and only the override dates go to WFM queue. Only the agent can cancel their own request.
 
 ## Speed
 
