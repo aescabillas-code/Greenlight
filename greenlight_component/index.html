@@ -1404,13 +1404,18 @@ function appBase(){ var b = '';
   try { b = window.parent.location.href; } catch (e){}
   if (!b) try { b = document.referrer; } catch (e){}
   return String(b || '').split(/[?#]/)[0].replace('/~/+', ''); }
+/* Save settings with the change shown at once; if the server refuses, the old value comes back. */
+function saveSet(o, then){ var prev = {}; Object.keys(o).forEach(function(k){ prev[k] = S.settings[k]; }); Object.assign(S.settings, o); render();
+  return call('saveSettings', settingsPayload(o)).then(function(r){ if (r.error){ Object.assign(S.settings, prev); render(); } (then || saved)(r); return r; }); }
+function saveOvr(h){ var prev = S.settings.ovr_reject_hours; S.settings.ovr_reject_hours = h; render();
+  return call('saveOvrSettings', {ovr_reject_hours:h}).then(function(r){ if (r.error){ S.settings.ovr_reject_hours = prev; render(); } saved(r); return r; }); }
 function settingsPayload(o){ var t = S.settings, w = wCfg(t); return Object.assign({wellness_on:w.on, wellness_from:w.start, wellness_to:w.end, wellness_days_off:w.off, wellness_per_year:w.per, wellness_per_month:w.pm, wellness_share:w.share, sick_on:t.sick_on !== false, emergency_on:t.emergency_on !== false, approval_mode:t.approval_mode, min_notice_days:t.min_notice_days, mgr_max_hours:t.mgr_max_hours || 72, mgr_window_off:!!t.mgr_window_off, timezone:curTZ()}, o); }
 var mgrNames = function(){ return uniq(function(x){ return x.manager; }).filter(Boolean); };
 var mgrColor = function(n){ return 'var(--rg' + (Math.max(0, mgrNames().indexOf(n)) % 4 + 1) + ')'; };
 function awaitingAll(){ return S.requests.filter(function(q){ return q.status === 'awaiting'; }); }
 function awaitingMine(){ return awaitingAll().filter(function(q){ return S.isManager && q.manager === S.managerName; }); }
-function applyState(st){
-  var sig = JSON.stringify(st); if (sig === lastSig) return; lastSig = sig;
+function applyState(st, sig0){
+  var sig = sig0 || JSON.stringify(st); if (sig === lastSig) return; lastSig = sig;
   S = st; used = new Map();
   setTimeout(ntfToast, 0);
   S.requests.forEach(function(q){ var t = ltOf(q); if ((q.status === 'approved' || q.status === 'awaiting') && isPlanned(t)){ var k = akey(q.department, q.region, q.date), k2 = k + (t === 'wellness' ? '|w' : '|p'); used.set(k, (used.get(k) || 0) + 1); used.set(k2, (used.get(k2) || 0) + 1); } });
@@ -1657,13 +1662,30 @@ function streamlitBackend(){
   var waiting = new Map();
   var post = function(m){ m.isStreamlitMessage = true; window.parent.postMessage(m, '*'); };
   var heard = false;
+  /* The server sends each part of the data (settings, roster, requests) only when it changed, with a key.
+     The page keeps the last copy of each part; if a key does not match what it has, it asks for everything again. */
+  var PART = {}, PKEY = {}, lastResync = 0;
+  var REQ_DEF = {short_notice:false, override_request:'', override_status:'', override_type:'', decided_by:'auto', override_reason:'', note:'', batch_id:'', mgr_deadline:'', mgr_by:'', mgr_status:'', decided_at:'', cancelled_from:''};
+  var fillReq = function(q){ for (var k in REQ_DEF) if (!(k in q)) q[k] = REQ_DEF[k]; if (!q.notices) q.notices = []; if (!q.attachments) q.attachments = []; return q; };
+  var takeState = function(st){
+    if (!st.keys) return {st:st};
+    var miss = false;
+    Object.keys(st.keys).forEach(function(k){
+      var part = st.parts && st.parts[k];
+      if (part){ if (k === 'requests') part.requests.forEach(fillReq); PART[k] = part; PKEY[k] = st.keys[k]; }
+      else if (PKEY[k] !== st.keys[k] || !PART[k]) miss = true;
+    });
+    if (miss){ var now = Date.now(); if (now - lastResync > 1500){ lastResync = now; post({type:'streamlit:setComponentValue', value:{id:uid(), type:'poll', payload:{resync:1}, tk:lsGet('greenlight_token')}, dataType:'json'}); } return null; }
+    var who = st.who || {};
+    return {st:Object.assign({}, PART.cfg, PART.roster, PART.requests, who), sig:JSON.stringify(PKEY) + JSON.stringify(who)};
+  };
   /* If Streamlit never sends data, say so instead of showing "Loading" forever. */
   setTimeout(function(){ if (heard) return; var m = $('#main'); if (m) m.innerHTML = '<div class="panel bootfail" role="alert"><h2>Greenlight is taking too long to start</h2><p>The page loaded but has not heard from the app server yet. This usually means the Streamlit app is still starting, it cannot reach MongoDB, or a secret is missing. Check the app log, then reload.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>'; }, 15000);
   window.addEventListener('message', function(e){
     var d = e.data; if (!d || d.type !== 'streamlit:render') return;
     heard = true;
     var a = d.args || {};
-    if (a.state) applyState(a.state);
+    if (a.state){ var got = takeState(a.state); if (got) applyState(got.st, got.sig); }
     if (a.response && waiting.has(a.response.id)){ var done = waiting.get(a.response.id); waiting.delete(a.response.id); done(a.response.result || {}); }
   });
   post({type:'streamlit:componentReady', apiVersion:1});
@@ -2951,7 +2973,7 @@ var ACT = {
   apBulk: function(el){ if (!UI.ap.sel.length) return; openModal({type:'mgr', ids:UI.ap.sel.slice(), action:el.dataset.v}); },
   doMgr: function(){ var m = UI.modal; call('mgrBulk', {ids:m.ids, status:m.action === 'approve' ? 'approved' : 'rejected', reason:val('mgReason')}).then(function(r){ if (!r.error){ closeModal(); UI.ap.sel = []; toast(m.action === 'approve' ? mgrToast(r) : (r.count === 1 ? 'Request rejected' : r.count + ' requests rejected') + '. The slots are open again.'); } }); },
   mgrCancel: function(el){ openModal({type:'mcancel', id:el.dataset.id}); },
-  ovrQuick: function(el){ call('saveOvrSettings', {ovr_reject_hours:+el.dataset.v}).then(saved); },
+  ovrQuick: function(el){ saveOvr(+el.dataset.v); },
   lowF: function(el){ UI.lowF = el.dataset.v; UI.lowN = 12; render(); },
   lowMore: function(){ UI.lowN = (UI.lowN || 12) + 25; render(); },
   lowAll: function(){ UI.lowN = 100000; render(); },
@@ -2992,10 +3014,10 @@ var ACT = {
     if (kind === 'pct') call('setRequired', {department:m.dept, regions:regs, month:month, clear_all:all, mode:'pct', headcount:clampInt(v, 0, 100)}).then(done);
     else if (kind === 'required') call('setRequired', {department:m.dept, regions:regs, month:month, clear_all:all, headcount:clampInt(v, 0, 9999)}).then(done);
     else call('setDefaults', {department:m.dept, regions:regs, month:month, clear_all:all, slots:clampInt(v, 0, 999)}).then(done); },
-  mgrOff: function(el){ call('saveSettings', settingsPayload({mgr_window_off:el.dataset.v === 'off'})).then(saved); },
-  ulOn: function(el){ var o = {}; o[el.dataset.k] = el.dataset.v === 'on'; call('saveSettings', settingsPayload(o)).then(saved); },
-  wOn: function(el){ call('saveSettings', settingsPayload({wellness_on:el.dataset.v === 'on'})).then(saved); },
-  wDayLock: function(el){ var off = wCfg().off.slice(), d = el.dataset.v, i = off.indexOf(d); if (i >= 0) off.splice(i, 1); else off.push(d); call('saveSettings', settingsPayload({wellness_days_off:off})).then(saved); },
+  mgrOff: function(el){ saveSet({mgr_window_off:el.dataset.v === 'off'}); },
+  ulOn: function(el){ var o = {}; o[el.dataset.k] = el.dataset.v === 'on'; saveSet(o); },
+  wOn: function(el){ saveSet({wellness_on:el.dataset.v === 'on'}); },
+  wDayLock: function(el){ var off = wCfg().off.slice(), d = el.dataset.v, i = off.indexOf(d); if (i >= 0) off.splice(i, 1); else off.push(d); saveSet({wellness_days_off:off}); },
   clearReq: function(){ var m = UI.modal, R = regionsOf(m.dept)[Math.max(0, m.ri || 0)];
     call('setRequired', {department:m.dept, regions:[R], month:'*', headcount:null}).then(function(r){ if (!r.error) toast(R + ' is back to default slots'); }); },
   cov: function(el){ UI.modal.cov = {d:el.dataset.d}; renderModal(true); },
@@ -3048,7 +3070,7 @@ var ACT = {
   doReject: function(){ call('decide', {id:UI.modal.id, status:'rejected', reason:val('rjReason')}).then(after('Rejected')); },
   doEdit: function(){ var d = val('edDate'); if (!/^\d{4}-\d{2}-\d{2}$/.test(d)){ toast('Pick a valid date.', true); return; } call('editRequest', {id:UI.modal.id, date:d, status:val('edStatus'), note:val('edNote')}).then(after('Request updated')); },
   doDelete: function(){ call('deleteRequest', {id:UI.modal.id}).then(after('Request deleted')); },
-  mode: function(el){ call('saveSettings', settingsPayload({approval_mode:el.dataset.v})).then(function(r){ if (!r.error) toast('Saved'); }); },
+  mode: function(el){ saveSet({approval_mode:el.dataset.v}); },
   template: function(){
     var b; try { b = buildTemplate(); } catch (e){ toast('The template could not be built. Try again.', true); return; }
     saveFile(b, 'Greenlight roster template.xlsx').then(function(){ toast('Template ready'); }, function(e){ var c = e && e.code; if (c === 'declined') return; toast(c === 'rate_limited' ? 'A save is already open. Finish it first.' : 'Downloads are not available in this view.', true); }); },
@@ -3080,12 +3102,12 @@ var CH = {
   ui: function(el){ UI[el.dataset.k] = el.value; render(); },
   defMonthSel: function(el){ var y = document.getElementById('defYear'); if (y) y.disabled = el.value === '*'; },
   mJump: function(el){ if (el.value){ UI.mAnchor = el.value; render(); } },
-  notice: function(){ call('saveSettings', settingsPayload({min_notice_days:clampInt(val('noticeN'), 0, 365) * (+val('noticeU') || 1)})).then(saved); },
-  ovrwin: function(){ var h = clampInt(val('ovrHours'), 1, 336); call('saveOvrSettings', {ovr_reject_hours:h}).then(saved); },
+  notice: function(){ saveSet({min_notice_days:clampInt(val('noticeN'), 0, 365) * (+val('noticeU') || 1)}); },
+  ovrwin: function(){ saveOvr(clampInt(val('ovrHours'), 1, 336)); },
   arSel: function(el){ UI.ar[el.dataset.k] = el.value; UI.ar.n = 150; render(); },
   arJump: function(el){ if (el.value){ UI.ar.anchor = el.value; render(); } },
-  wSet: function(){ var a = clampInt(val('wFrom'), 1, 12), b = clampInt(val('wTo'), 1, 12); call('saveSettings', settingsPayload({wellness_from:a, wellness_to:b, wellness_per_year:clampInt(val('wPer'), 0, 60), wellness_per_month:clampInt(val('wPm'), 1, 31), wellness_share:clampInt(val('wShare'), 0, 100)})).then(saved); },
-  mgrwin: function(){ var mx = clampInt(val('mgrMax'), 1, 168); call('saveSettings', settingsPayload({mgr_max_hours:mx})).then(saved); },
+  wSet: function(){ var a = clampInt(val('wFrom'), 1, 12), b = clampInt(val('wTo'), 1, 12); saveSet({wellness_from:a, wellness_to:b, wellness_per_year:clampInt(val('wPer'), 0, 60), wellness_per_month:clampInt(val('wPm'), 1, 31), wellness_share:clampInt(val('wShare'), 0, 100)}); },
+  mgrwin: function(){ var mx = clampInt(val('mgrMax'), 1, 168); saveSet({mgr_max_hours:mx}); },
   tz: function(el){ call('saveSettings', settingsPayload({timezone:el.value})).then(function(r){ if (!r.error) toast('Timezone set to ' + tzName(el.value)); }); },
   override: function(el){ var D = UI.modal.dept, R = el.dataset.r, s = slotVal(el), eff = baseAlloc(S, D, R, el.dataset.d); if (s === eff) s = null; if (s == null) el.value = eff;
     call('setOverride', {department:D, region:R, date:el.dataset.d, slots:s}).then(saved); },
