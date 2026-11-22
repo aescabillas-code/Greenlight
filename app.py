@@ -203,8 +203,18 @@ def sweep(db) -> int:
          "$push": {"notices": agent_notice("ovr_expired", now)}})
     changed = r1.modified_count + r2.modified_count + r3.modified_count
     if changed:
-        bump_version(db)
+        bump_version(db, ("requests",))
     return changed
+
+
+REQ_DEFAULTS = {"notices": [], "short_notice": False, "override_request": "", "override_status": "", "override_type": "",
+                "decided_by": "auto", "override_reason": "", "note": "", "attachments": [], "batch_id": "", "mgr_deadline": "",
+                "mgr_by": "", "mgr_status": "", "decided_at": "", "cancelled_from": ""}
+
+
+def compact_request(row: dict) -> dict:
+    """The row without fields that hold their default value, so the page receives far less data."""
+    return {k: v for k, v in row.items() if k not in REQ_DEFAULTS or v != REQ_DEFAULTS[k]}
 
 
 def serialize_request(doc: dict) -> dict:
@@ -964,12 +974,13 @@ def handle(db, event: dict) -> dict:
         if window_off and not before["mgr_window_off"]:
             # No window: requests already waiting lose their deadline, so none of them expires.
             db.requests.update_many({"status": "awaiting"}, {"$unset": {"mgr_deadline": ""}})
+            bump_version(db, ("requests",))
         elif not window_off and before["mgr_window_off"]:
             # Window turned back on: waiting requests get a fresh window from now.
             now = datetime.now(timezone.utc)
             db.requests.update_many({"status": "awaiting", "mgr_deadline": {"$exists": False}},
                                     {"$set": {"mgr_deadline": now + timedelta(hours=mx), "mgr_reminded": False}})
-        bump_version(db)
+            bump_version(db, ("requests",))
         return {"ok": True}
     if kind == "setDefault":
         month = str(payload.get("month", ""))
@@ -1108,14 +1119,39 @@ except Exception as exc:  # connection problems, bad URI, blocked IP
     st.stop()
 
 
+PARTS = ("cfg", "roster", "requests", "mgrs")   # settings and allocation; roster; requests; manager sign-in list
+
+
 def get_version(db) -> int:
     """One tiny read: a counter that goes up whenever anyone changes anything."""
     doc = db.meta.find_one({"_id": "version"}, {"n": 1})
     return int(doc["n"]) if doc else 0
 
 
-def bump_version(db):
-    db.meta.update_one({"_id": "version"}, {"$inc": {"n": 1}}, upsert=True)
+def get_versions(db) -> dict:
+    """One tiny read: the overall counter plus one counter for each part of the data."""
+    doc = db.meta.find_one({"_id": "version"}) or {}
+    return {k: int(doc.get(k, 0)) for k in ("n",) + PARTS}
+
+
+def bump_version(db, parts=None):
+    """Tell every visitor something changed. Only the parts named are reloaded (all of them if none are named)."""
+    inc = {"n": 1}
+    for k in (parts or PARTS):
+        inc[k] = 1
+    db.meta.update_one({"_id": "version"}, {"$inc": inc}, upsert=True)
+
+
+# Which parts of the data each action can change. Actions not listed reload everything, to be safe.
+ACTION_PARTS = {
+    "saveSettings": ("cfg",), "saveOvrSettings": ("cfg",), "setDefault": ("cfg",), "setDefaults": ("cfg",),
+    "setRequired": ("cfg",), "setOverride": ("cfg",), "clearOverrides": ("cfg",),
+    "managerLink": ("mgrs",), "mgrSetup": ("mgrs",), "mgrForgot": ("mgrs",), "mgrChangePass": ("mgrs",), "setManagerPasscode": ("mgrs",),
+    "submit": ("requests",), "cancelRequest": ("requests",), "editMine": ("requests",), "mgrDecide": ("requests",),
+    "decide": ("requests",), "bulkOverride": ("requests",), "overrideRequest": ("requests",), "declineOverride": ("requests",),
+    "editRequest": ("requests",),
+    "getAttachment": (), "mgrSetupDismiss": (), "changePassword": (),   # change nothing anyone else sees
+}
 
 
 # ---------------------------------------------------------------- speed
@@ -1125,10 +1161,11 @@ def bump_version(db):
 
 @st.cache_resource(show_spinner=False)
 def _shared() -> dict:
-    return {"lock": threading.Lock(), "ver": None, "at": 0.0, "today": "", "base": None, "mgrs": None, "swept": 0.0}
+    return {"lock": threading.Lock(), "pv": None, "at": 0.0, "ver": None, "base": None, "mgrs": None, "swept": 0.0,
+            "keys": {"cfg": "", "roster": "", "requests": ""}}
 
 
-def _build_base(db) -> dict:
+def _load_cfg(db) -> dict:
     today = today_iso(db)
     cutoff = (date.fromisoformat(today) - timedelta(days=400)).isoformat()
     settings = get_settings(db)
@@ -1146,16 +1183,27 @@ def _build_base(db) -> dict:
     settings["defaults"] = defaults
     settings["required"] = required
     settings["required_pct"] = required_pct
-    return {
-        "today": today,
-        "settings": settings,
-        "overrides": overrides,
-        "roster": list(db.roster.find({}, {"_id": 0}).sort("name", ASCENDING)),
-        "requests": [serialize_request(r) for r in db.requests.find({"date": {"$gte": cutoff}}).sort("date", ASCENDING)],
-    }
+    return {"today": today, "settings": settings, "overrides": overrides}
+
+
+def _load_roster(db) -> dict:
+    return {"roster": list(db.roster.find({}, {"_id": 0}).sort("name", ASCENDING))}
+
+
+def _load_requests(db, today: str) -> dict:
+    cutoff = (date.fromisoformat(today) - timedelta(days=400)).isoformat()
+    return {"requests": [compact_request(serialize_request(r)) for r in db.requests.find({"date": {"$gte": cutoff}}).sort("date", ASCENDING)]}
+
+
+def _build_base(db) -> dict:
+    cfg = _load_cfg(db)
+    return {"cfg": cfg, "roster": _load_roster(db), "requests": _load_requests(db, cfg["today"])}
 
 
 def shared_data(db, force: bool = False) -> dict:
+    """Everyone shares one copy of the data. Each part (settings and allocation, roster, requests) is reloaded only
+    when its own counter changed, so changing a setting does not reload every request. Everything is reloaded
+    when the day rolls over or after a minute, to pick up edits made straight in the database."""
     sh = _shared()
     now = time.time()
     if now - sh["swept"] > 20:  # time-based steps (reminders, expiries), once every 20 s for the whole app
@@ -1164,23 +1212,62 @@ def shared_data(db, force: bool = False) -> dict:
             sweep(db)
         except Exception:
             pass
-    ver = get_version(db)
+    pv = get_versions(db)
     with sh["lock"]:
-        if force or sh["base"] is None or ver != sh["ver"] or now - sh["at"] > 60:
+        full = force or sh["base"] is None or sh["pv"] is None or now - sh["at"] > 60
+        old = sh["pv"] or {}
+        if full:
+            prev = sh["base"] or {}
             sh["base"] = _build_base(db)
-            sh["ver"], sh["at"], sh["mgrs"] = ver, now, None
+            sh["at"] = now
+            sh["mgrs"] = None
+            # a timed reload only re-sends the parts that really differ
+            stale = [k for k in ("cfg", "roster", "requests") if force or prev.get(k) != sh["base"][k] or not sh["keys"].get(k)]
+        else:
+            stale = [k for k in ("cfg", "roster", "requests") if pv.get(k) != old.get(k)]
+            if "cfg" in stale:
+                sh["base"]["cfg"] = _load_cfg(db)
+            if "roster" in stale:
+                sh["base"]["roster"] = _load_roster(db)
+            if "requests" in stale or ("cfg" in stale and sh["base"]["cfg"]["today"] != old.get("today")):
+                sh["base"]["requests"] = _load_requests(db, sh["base"]["cfg"]["today"])
+                stale = list(set(stale) | {"requests"})
+            if pv.get("mgrs") != old.get("mgrs") or "roster" in stale:
+                sh["mgrs"] = None
+        for k in stale:
+            sh["keys"][k] = f"{k}-{pv.get(k, 0)}-{now:.6f}"
+        sh["pv"] = {**pv, "today": sh["base"]["cfg"]["today"]}
+        sh["ver"] = pv.get("n", 0)
         return sh
 
 
 def page_state(db, force: bool = False) -> dict:
-    """The shared data plus who this visitor is. Cheap: nothing is reloaded unless something changed."""
+    """The shared data plus who this visitor is. Cheap: nothing is reloaded unless something changed.
+    Each part of the data is sent to this browser only when it changed since the last time it was sent;
+    otherwise only its key goes, and the page keeps the copy it already has."""
     sh = shared_data(db, force)
     is_admin = bool(st.session_state.get("is_admin"))
     if is_admin and sh["mgrs"] is None:
         sh["mgrs"] = manager_list(db)
     st.session_state["ver"] = sh["ver"]
+    sent = dict(st.session_state.get("sent_keys") or {})
+    keys = dict(sh["keys"])
+    parts = {}
+    for k, key in keys.items():
+        if sent.get(k) != key:
+            parts[k] = sh["base"][k]
+            sent[k] = key
+    st.session_state["sent_keys"] = sent
     return {
-        **sh["base"],
+        "keys": keys,
+        "parts": parts,
+        "who": page_who(db, sh, is_admin),
+    }
+
+
+def page_who(db, sh: dict, is_admin: bool) -> dict:
+    """Who this visitor is: small, sent every time."""
+    return {
         "isAdmin": is_admin,
         "isDev": bool(st.session_state.get("is_dev")),
         "isOvAdmin": bool(st.session_state.get("is_override")),
@@ -1210,18 +1297,23 @@ if isinstance(event, dict) and event.get("id") and event.get("id") != st.session
     old = st.session_state.get("response") or {}
     if isinstance(old.get("result"), dict) and old["result"].get("data"):
         st.session_state["response"] = None  # a file was already delivered: do not send it again with every refresh
+    if event.get("type") == "poll" and isinstance(event.get("payload"), dict) and event["payload"].get("resync"):
+        st.session_state["sent_keys"] = {}  # the page lost its copy: send every part again
     if event.get("type") != "poll":
         try:
             result = handle(database, event)
-            if event.get("type") not in ("login", "logout"):
-                bump_version(database)
-                changed = True
+            kind = event.get("type")
+            if kind not in ("login", "logout"):
+                parts = ACTION_PARTS.get(kind, PARTS)
+                if parts:
+                    bump_version(database, parts)
+                    changed = True
         except Exception as exc:
             result = {"error": f"That did not save: {exc}"}
         st.session_state["response"] = {"id": event.get("id"), "result": result}
 
 try:
-    state = page_state(database, force=changed)
+    state = page_state(database)
 except Exception as exc:
     st.error(f"Greenlight could not read from MongoDB.\n\n{exc}")
     st.stop()

@@ -110,6 +110,14 @@ Manager passcodes are set by WFM in Settings > Manager sign-in (hashed in the `m
 5. Short-notice dates and full days skip the manager step and follow the existing override flow.
 6. Agents tap the date on their calendar to follow the request. From there they can edit it (date or note) until the manager answers, and can cancel an awaiting, pending or approved request before its date. Managers and WFM can cancel approved time off. A cancelled request is kept for the record and its slot opens up again.
 
+## Speed: what is sent and when
+
+- **Only what changed is sent.** The data is split into three parts: settings and allocation, the roster, and requests. Each browser gets a part only when it changed since that browser last received it. The automatic refresh every few seconds now sends a few hundred bytes instead of the whole data set (about 3.3 MB for 600 agents and 6,000 requests before, now about 0.3 KB).
+- **Only what changed is reloaded.** Each part has its own counter in the `meta` collection. Changing a setting reloads only settings and allocation from MongoDB, not every request, so a settings change answers in about half the time and sends about 3 KB instead of the full data.
+- **Settings change on screen at once.** Toggles and fields in Settings show the new value immediately and save in the background; if the server refuses, the old value comes back with a message.
+- **Smaller request rows.** Fields that hold their default value (empty notes, no attachments and so on) are left out and filled back in by the page, which roughly halves the size of the request list.
+- If a browser ever misses an update, it notices the mismatch and asks for everything again automatically.
+
 ## WFM decides override requests (Admin role removed)
 
 - The separate **Admin** role is gone. WFM now has the **Override requests** tab and decides every override request (approve with a reason, or reject; several at once).
